@@ -100,6 +100,7 @@ function init() {
 
   bindEvents();
   addDemoLayout();
+  resetFpvToSpawn();
   renderAll();
   requestAnimationFrame(tickFpv);
 }
@@ -124,8 +125,14 @@ function bindEvents() {
     renderAll();
   });
 
-  [els.wallHeight, els.snapSize, els.stageWidth, els.stageDepth].forEach((input) =>
+  [els.wallHeight, els.snapSize].forEach((input) =>
     input.addEventListener("input", renderAll),
+  );
+  [els.stageWidth, els.stageDepth].forEach((input) =>
+    input.addEventListener("input", () => {
+      resetFpvToSpawn();
+      renderAll();
+    }),
   );
 
   els.undoButton.addEventListener("click", undo);
@@ -133,12 +140,14 @@ function bindEvents() {
     pushHistory();
     state.blockedReason = null;
     addDemoLayout();
+    resetFpvToSpawn();
     renderAll();
   });
   els.clearButton.addEventListener("click", () => {
     pushHistory();
     state.blockedReason = null;
     state.walls = [];
+    resetFpvToSpawn();
     renderAll();
   });
 
@@ -211,6 +220,7 @@ function undo() {
   const previous = state.history.pop();
   if (!previous) return;
   state.walls = JSON.parse(previous);
+  resetFpvToSpawn();
   renderAll();
 }
 
@@ -310,6 +320,7 @@ function onPlanPointerDown(event) {
     if (hit) {
       pushHistory();
       eraseBlock(hit);
+      resetFpvToSpawn();
       renderAll();
     }
     return;
@@ -336,6 +347,7 @@ function onPlanPointerUp(event) {
       state.blockedReason = null;
       pushHistory();
       state.walls.push(...created);
+      resetFpvToSpawn();
     } else {
       state.blockedReason = placement.reason;
     }
@@ -1078,6 +1090,48 @@ function canPlaceFpv(x, z) {
   return !getCollisionRects().some((rect) => rectsIntersect(playerRect, rect));
 }
 
+function resetFpvToSpawn() {
+  const spawn = findFpvSpawn();
+  state.fpv.x = spawn.x;
+  state.fpv.z = spawn.z;
+  state.fpv.yaw = spawn.yaw;
+  state.fpv.pitch = 0;
+  clearFpvKeys();
+  updateFpvStatus();
+}
+
+function findFpvSpawn() {
+  const stage = getStage();
+  const h = state.fpv.halfSize;
+  const step = Math.max(6, getSnap() / 2);
+  const candidates = [];
+
+  for (let x = h; x <= stage.width - h; x += step) {
+    candidates.push({ x, z: h, yaw: 0 });
+    candidates.push({ x, z: stage.depth - h, yaw: 180 });
+  }
+  for (let z = h; z <= stage.depth - h; z += step) {
+    candidates.push({ x: h, z, yaw: 90 });
+    candidates.push({ x: stage.width - h, z, yaw: 270 });
+  }
+
+  const centered = candidates.sort(
+    (a, b) =>
+      Math.hypot(a.x - stage.width / 2, a.z - stage.depth / 2) -
+      Math.hypot(b.x - stage.width / 2, b.z - stage.depth / 2),
+  );
+  const edgeSpawn = centered.find((candidate) => canPlaceFpv(candidate.x, candidate.z));
+  if (edgeSpawn) return edgeSpawn;
+
+  for (let z = h; z <= stage.depth - h; z += step) {
+    for (let x = h; x <= stage.width - h; x += step) {
+      if (canPlaceFpv(x, z)) return { x, z, yaw: 0 };
+    }
+  }
+
+  return { x: h, z: h, yaw: 0 };
+}
+
 function clampFpvToStage() {
   const stage = getStage();
   const h = state.fpv.halfSize;
@@ -1195,6 +1249,12 @@ function makeFpvCamera() {
 }
 
 function projectFpv(point, camera) {
+  const cameraPoint = worldToFpvCamera(point, camera);
+  if (cameraPoint.z <= camera.near) return null;
+  return projectFpvCamera(cameraPoint, camera);
+}
+
+function worldToFpvCamera(point, camera) {
   const dx = point.x - camera.x;
   const dy = point.y - camera.y;
   const dz = point.z - camera.z;
@@ -1208,12 +1268,45 @@ function projectFpv(point, camera) {
   const y1 = dy * cosP - z1 * sinP;
   const z2 = dy * sinP + z1 * cosP;
 
-  if (z2 <= camera.near) return null;
+  return { x: x1, y: y1, z: z2 };
+}
 
+function projectFpvCamera(point, camera) {
   return {
-    x: els.fpvCanvas.width / 2 + (x1 * camera.focal) / z2,
-    y: els.fpvCanvas.height / 2 - (y1 * camera.focal) / z2,
-    depth: z2,
+    x: els.fpvCanvas.width / 2 + (point.x * camera.focal) / point.z,
+    y: els.fpvCanvas.height / 2 - (point.y * camera.focal) / point.z,
+    depth: point.z,
+  };
+}
+
+function clipPolygonToNearPlane(points, near) {
+  const clipped = [];
+
+  for (let i = 0; i < points.length; i += 1) {
+    const current = points[i];
+    const next = points[(i + 1) % points.length];
+    const currentInside = current.z >= near;
+    const nextInside = next.z >= near;
+
+    if (currentInside && nextInside) {
+      clipped.push(next);
+    } else if (currentInside && !nextInside) {
+      clipped.push(intersectNearPlane(current, next, near));
+    } else if (!currentInside && nextInside) {
+      clipped.push(intersectNearPlane(current, next, near));
+      clipped.push(next);
+    }
+  }
+
+  return clipped;
+}
+
+function intersectNearPlane(a, b, near) {
+  const t = (near - a.z) / (b.z - a.z);
+  return {
+    x: a.x + (b.x - a.x) * t,
+    y: a.y + (b.y - a.y) * t,
+    z: near,
   };
 }
 
@@ -1288,11 +1381,13 @@ function boxFacesFpv(box, camera) {
   ];
 
   return faces.flatMap((face) => {
-    const points = face.slice(0, 4).map((key) => projectFpv(vertices[key], camera));
-    if (points.some((point) => !point)) return [];
+    const cameraPoints = face.slice(0, 4).map((key) => worldToFpvCamera(vertices[key], camera));
+    const clipped = clipPolygonToNearPlane(cameraPoints, camera.near);
+    if (clipped.length < 3) return [];
+    const points = clipped.map((point) => projectFpvCamera(point, camera));
     return {
       points,
-      depth: points.reduce((sum, point) => sum + point.depth, 0) / points.length,
+      depth: clipped.reduce((sum, point) => sum + point.z, 0) / clipped.length,
       color: shadeColor(box.color, face[4]),
     };
   });

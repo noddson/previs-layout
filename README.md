@@ -48,6 +48,8 @@ The top-down erase tool removes the selected footprint column through the wall h
 The FPV view keeps the camera on the ground plane and uses a 10-inch square
 collision box, allowing it to fit through narrow 12-inch openings while still
 blocking movement through wall and room boxes.
+The FPV start position resets to a free stage edge whenever the layout or stage
+size changes.
 
 Rooms are generated with butt-jointed corners, so top and bottom runs claim the corner
 volume and side runs start between them. Room dimensions are snapped to whole box
