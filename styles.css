@@ -247,14 +247,24 @@ canvas {
   touch-action: none;
 }
 
-#previewCanvas {
+#previewCanvas,
+#fpvCanvas {
   aspect-ratio: 35 / 13;
   cursor: grab;
   touch-action: none;
 }
 
-#previewCanvas:active {
+#previewCanvas:active,
+#fpvCanvas:active {
   cursor: grabbing;
+}
+
+#fpvCanvas {
+  outline: none;
+}
+
+#fpvCanvas:focus-visible {
+  box-shadow: inset 0 0 0 3px rgba(15, 143, 138, 0.45);
 }
 
 .summary-panel {

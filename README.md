@@ -14,6 +14,7 @@ A browser-based planner for building movie pre-visualization layouts from cardbo
 - See total box count, cost, type breakdown, and wall-run breakdown.
 - Rotate, tilt, and zoom a 3D preview generated from the same box layout.
 - Use the orbit preview axis gizmo to read yaw/pitch and snap to X, Y, or Z views.
+- Walk through the layout in an FPV view with WASD movement, mouse-look, stage bounds, and wall collision.
 - Erase individual box footprints from a wall run.
 - Prevent intersecting box footprints when drawing wall runs or rooms.
 
@@ -43,6 +44,10 @@ Placements that would intersect existing boxes are blocked.
 Wall runs use the first clicked grid point as the first box footprint edge instead
 of a wall centerline, so boxes stay aligned to the grid from the placement point.
 The top-down erase tool removes the selected footprint column through the wall height.
+
+The FPV view keeps the camera on the ground plane and uses a 10-inch square
+collision box, allowing it to fit through narrow 12-inch openings while still
+blocking movement through wall and room boxes.
 
 Rooms are generated with butt-jointed corners, so top and bottom runs claim the corner
 volume and side runs start between them. Room dimensions are snapped to whole box

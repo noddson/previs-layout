@@ -44,11 +44,24 @@ const state = {
     lastX: 0,
     lastY: 0,
   },
+  fpv: {
+    x: 48,
+    z: 48,
+    yaw: 0,
+    pitch: 0,
+    halfSize: 5,
+    eyeHeight: 60,
+    speed: 96,
+    dragging: false,
+    lastFrame: 0,
+    keys: {},
+  },
 };
 
 const els = {
   planCanvas: document.querySelector("#planCanvas"),
   previewCanvas: document.querySelector("#previewCanvas"),
+  fpvCanvas: document.querySelector("#fpvCanvas"),
   boxType: document.querySelector("#boxType"),
   boxCost: document.querySelector("#boxCost"),
   wallHeight: document.querySelector("#wallHeight"),
@@ -63,6 +76,8 @@ const els = {
   scaleReadout: document.querySelector("#scaleReadout"),
   heightReadout: document.querySelector("#heightReadout"),
   previewReadout: document.querySelector("#previewReadout"),
+  fpvReadout: document.querySelector("#fpvReadout"),
+  fpvStatus: document.querySelector("#fpvStatus"),
   undoButton: document.querySelector("#undoButton"),
   demoButton: document.querySelector("#demoButton"),
   clearButton: document.querySelector("#clearButton"),
@@ -70,6 +85,7 @@ const els = {
 
 const planCtx = els.planCanvas.getContext("2d");
 const previewCtx = els.previewCanvas.getContext("2d");
+const fpvCtx = els.fpvCanvas.getContext("2d");
 let planMetrics = null;
 
 function init() {
@@ -85,6 +101,7 @@ function init() {
   bindEvents();
   addDemoLayout();
   renderAll();
+  requestAnimationFrame(tickFpv);
 }
 
 function bindEvents() {
@@ -136,6 +153,16 @@ function bindEvents() {
   els.previewCanvas.addEventListener("pointerup", onPreviewPointerUp);
   els.previewCanvas.addEventListener("pointercancel", onPreviewPointerUp);
   els.previewCanvas.addEventListener("wheel", onPreviewWheel, { passive: false });
+
+  els.fpvCanvas.addEventListener("pointerdown", onFpvPointerDown);
+  els.fpvCanvas.addEventListener("pointermove", onFpvPointerMove);
+  els.fpvCanvas.addEventListener("pointerup", onFpvPointerUp);
+  els.fpvCanvas.addEventListener("pointercancel", onFpvPointerUp);
+  document.addEventListener("pointerlockchange", updateFpvStatus);
+  document.addEventListener("mousemove", onFpvMouseMove);
+  window.addEventListener("keydown", onFpvKeyDown);
+  window.addEventListener("keyup", onFpvKeyUp);
+  window.addEventListener("blur", clearFpvKeys);
 
   window.addEventListener("resize", renderAll);
 }
@@ -214,8 +241,11 @@ function makeWall(x1, y1, x2, y2, height, boxId) {
 function renderAll() {
   resizeCanvasToDisplay(els.planCanvas);
   resizeCanvasToDisplay(els.previewCanvas);
+  resizeCanvasToDisplay(els.fpvCanvas);
+  clampFpvToStage();
   drawPlan();
   drawPreview();
+  drawFpv();
   renderSummary();
 }
 
@@ -982,6 +1012,303 @@ function onPreviewWheel(event) {
   event.preventDefault();
   state.orbit.zoom = clamp(state.orbit.zoom * (event.deltaY > 0 ? 0.92 : 1.08), 0.5, 2.2);
   drawPreview();
+}
+
+function tickFpv(timestamp) {
+  const previous = state.fpv.lastFrame || timestamp;
+  const dt = Math.min(0.05, (timestamp - previous) / 1000);
+  state.fpv.lastFrame = timestamp;
+  if (updateFpvPosition(dt)) drawFpv();
+  requestAnimationFrame(tickFpv);
+}
+
+function updateFpvPosition(dt) {
+  const keys = state.fpv.keys;
+  let moveX = 0;
+  let moveZ = 0;
+  const yaw = (state.fpv.yaw * Math.PI) / 180;
+  const forward = { x: Math.sin(yaw), z: Math.cos(yaw) };
+  const right = { x: Math.cos(yaw), z: -Math.sin(yaw) };
+
+  if (keys.w) {
+    moveX += forward.x;
+    moveZ += forward.z;
+  }
+  if (keys.s) {
+    moveX -= forward.x;
+    moveZ -= forward.z;
+  }
+  if (keys.d) {
+    moveX += right.x;
+    moveZ += right.z;
+  }
+  if (keys.a) {
+    moveX -= right.x;
+    moveZ -= right.z;
+  }
+
+  const magnitude = Math.hypot(moveX, moveZ);
+  if (!magnitude) return false;
+
+  const step = state.fpv.speed * dt;
+  moveFpv((moveX / magnitude) * step, (moveZ / magnitude) * step);
+  return true;
+}
+
+function moveFpv(dx, dz) {
+  const nextX = state.fpv.x + dx;
+  if (canPlaceFpv(nextX, state.fpv.z)) state.fpv.x = nextX;
+
+  const nextZ = state.fpv.z + dz;
+  if (canPlaceFpv(state.fpv.x, nextZ)) state.fpv.z = nextZ;
+}
+
+function canPlaceFpv(x, z) {
+  const stage = getStage();
+  const h = state.fpv.halfSize;
+  const playerRect = {
+    left: x - h,
+    right: x + h,
+    top: z - h,
+    bottom: z + h,
+  };
+
+  if (footprintOutOfBounds(playerRect, stage)) return false;
+
+  return !getCollisionRects().some((rect) => rectsIntersect(playerRect, rect));
+}
+
+function clampFpvToStage() {
+  const stage = getStage();
+  const h = state.fpv.halfSize;
+  state.fpv.x = clamp(state.fpv.x, h, stage.width - h);
+  state.fpv.z = clamp(state.fpv.z, h, stage.depth - h);
+}
+
+function getCollisionRects() {
+  return getPlacementFootprints(state.walls).map((footprint) => footprint.rect);
+}
+
+function onFpvKeyDown(event) {
+  const key = event.key.toLowerCase();
+  if (!["w", "a", "s", "d"].includes(key) || !shouldCaptureFpvKeys()) return;
+  event.preventDefault();
+  state.fpv.keys[key] = true;
+}
+
+function onFpvKeyUp(event) {
+  const key = event.key.toLowerCase();
+  if (!["w", "a", "s", "d"].includes(key)) return;
+  state.fpv.keys[key] = false;
+}
+
+function shouldCaptureFpvKeys() {
+  return document.activeElement === els.fpvCanvas || document.pointerLockElement === els.fpvCanvas;
+}
+
+function onFpvPointerDown(event) {
+  els.fpvCanvas.focus();
+  state.fpv.dragging = true;
+  els.fpvCanvas.setPointerCapture(event.pointerId);
+  if (els.fpvCanvas.requestPointerLock) {
+    const lockRequest = els.fpvCanvas.requestPointerLock();
+    if (lockRequest?.catch) lockRequest.catch(() => {});
+  }
+}
+
+function onFpvPointerMove(event) {
+  if (document.pointerLockElement === els.fpvCanvas || !state.fpv.dragging) return;
+  rotateFpv(event.movementX || 0, event.movementY || 0);
+}
+
+function onFpvPointerUp() {
+  state.fpv.dragging = false;
+}
+
+function onFpvMouseMove(event) {
+  if (document.pointerLockElement !== els.fpvCanvas) return;
+  rotateFpv(event.movementX || 0, event.movementY || 0);
+}
+
+function rotateFpv(dx, dy) {
+  state.fpv.yaw += dx * 0.12;
+  state.fpv.pitch = clamp(state.fpv.pitch - dy * 0.1, -82, 82);
+  drawFpv();
+}
+
+function updateFpvStatus() {
+  if (!els.fpvStatus) return;
+  if (document.pointerLockElement !== els.fpvCanvas) state.fpv.dragging = false;
+  els.fpvStatus.textContent =
+    document.pointerLockElement === els.fpvCanvas ? "Mouse look active" : "Ground locked";
+}
+
+function clearFpvKeys() {
+  state.fpv.keys = {};
+}
+
+function drawFpv() {
+  const ctx = fpvCtx;
+  ctx.clearRect(0, 0, els.fpvCanvas.width, els.fpvCanvas.height);
+  drawFpvBackground(ctx);
+
+  const camera = makeFpvCamera();
+  drawFpvGround(ctx, camera);
+
+  const drawables = [];
+  generateBoxes()
+    .slice(0, 1800)
+    .forEach((box) => {
+      drawables.push(...boxFacesFpv(box, camera));
+    });
+  drawables.sort((a, b) => b.depth - a.depth);
+  drawables.forEach((face) => drawFace(ctx, face));
+
+  drawFpvHud(ctx);
+}
+
+function drawFpvBackground(ctx) {
+  const horizon = els.fpvCanvas.height * 0.52;
+  const sky = ctx.createLinearGradient(0, 0, 0, horizon);
+  sky.addColorStop(0, "#dfeef4");
+  sky.addColorStop(1, "#f7fbfd");
+  ctx.fillStyle = sky;
+  ctx.fillRect(0, 0, els.fpvCanvas.width, horizon);
+
+  const floor = ctx.createLinearGradient(0, horizon, 0, els.fpvCanvas.height);
+  floor.addColorStop(0, "#d8e0e4");
+  floor.addColorStop(1, "#bfcbd2");
+  ctx.fillStyle = floor;
+  ctx.fillRect(0, horizon, els.fpvCanvas.width, els.fpvCanvas.height - horizon);
+}
+
+function makeFpvCamera() {
+  return {
+    x: state.fpv.x,
+    y: state.fpv.eyeHeight,
+    z: state.fpv.z,
+    yaw: (state.fpv.yaw * Math.PI) / 180,
+    pitch: (state.fpv.pitch * Math.PI) / 180,
+    focal: Math.min(els.fpvCanvas.width, els.fpvCanvas.height) * 0.82,
+    near: 3,
+  };
+}
+
+function projectFpv(point, camera) {
+  const dx = point.x - camera.x;
+  const dy = point.y - camera.y;
+  const dz = point.z - camera.z;
+  const cosY = Math.cos(camera.yaw);
+  const sinY = Math.sin(camera.yaw);
+  const cosP = Math.cos(camera.pitch);
+  const sinP = Math.sin(camera.pitch);
+
+  const x1 = dx * cosY - dz * sinY;
+  const z1 = dx * sinY + dz * cosY;
+  const y1 = dy * cosP - z1 * sinP;
+  const z2 = dy * sinP + z1 * cosP;
+
+  if (z2 <= camera.near) return null;
+
+  return {
+    x: els.fpvCanvas.width / 2 + (x1 * camera.focal) / z2,
+    y: els.fpvCanvas.height / 2 - (y1 * camera.focal) / z2,
+    depth: z2,
+  };
+}
+
+function drawFpvGround(ctx, camera) {
+  const stage = getStage();
+  const corners = [
+    { x: 0, y: 0, z: 0 },
+    { x: stage.width, y: 0, z: 0 },
+    { x: stage.width, y: 0, z: stage.depth },
+    { x: 0, y: 0, z: stage.depth },
+  ]
+    .map((point) => projectFpv(point, camera))
+    .filter(Boolean);
+
+  if (corners.length === 4) {
+    ctx.save();
+    ctx.fillStyle = "rgba(255,255,255,0.18)";
+    ctx.strokeStyle = "#7b8a93";
+    ctx.lineWidth = 1.4 * (window.devicePixelRatio || 1);
+    tracePath(ctx, corners);
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  ctx.save();
+  ctx.strokeStyle = "rgba(70, 84, 94, 0.28)";
+  ctx.lineWidth = 1 * (window.devicePixelRatio || 1);
+  for (let x = 0; x <= stage.width; x += 48) {
+    drawFpvLine(ctx, { x, y: 0, z: 0 }, { x, y: 0, z: stage.depth }, camera);
+  }
+  for (let z = 0; z <= stage.depth; z += 48) {
+    drawFpvLine(ctx, { x: 0, y: 0, z }, { x: stage.width, y: 0, z }, camera);
+  }
+  ctx.restore();
+}
+
+function drawFpvLine(ctx, a, b, camera) {
+  const pa = projectFpv(a, camera);
+  const pb = projectFpv(b, camera);
+  if (!pa || !pb) return;
+  ctx.beginPath();
+  ctx.moveTo(pa.x, pa.y);
+  ctx.lineTo(pb.x, pb.y);
+  ctx.stroke();
+}
+
+function boxFacesFpv(box, camera) {
+  const x1 = box.cx - box.sx / 2;
+  const x2 = box.cx + box.sx / 2;
+  const y1 = box.cy - box.sy / 2;
+  const y2 = box.cy + box.sy / 2;
+  const z1 = box.cz - box.sz / 2;
+  const z2 = box.cz + box.sz / 2;
+  const vertices = {
+    a: { x: x1, y: y1, z: z1 },
+    b: { x: x2, y: y1, z: z1 },
+    c: { x: x2, y: y2, z: z1 },
+    d: { x: x1, y: y2, z: z1 },
+    e: { x: x1, y: y1, z: z2 },
+    f: { x: x2, y: y1, z: z2 },
+    g: { x: x2, y: y2, z: z2 },
+    h: { x: x1, y: y2, z: z2 },
+  };
+  const faces = [
+    ["a", "b", "c", "d", 0.72],
+    ["e", "f", "g", "h", 0.92],
+    ["d", "c", "g", "h", 1.12],
+    ["a", "b", "f", "e", 0.62],
+    ["b", "c", "g", "f", 0.82],
+    ["a", "d", "h", "e", 0.68],
+  ];
+
+  return faces.flatMap((face) => {
+    const points = face.slice(0, 4).map((key) => projectFpv(vertices[key], camera));
+    if (points.some((point) => !point)) return [];
+    return {
+      points,
+      depth: points.reduce((sum, point) => sum + point.depth, 0) / points.length,
+      color: shadeColor(box.color, face[4]),
+    };
+  });
+}
+
+function drawFpvHud(ctx) {
+  const dpr = window.devicePixelRatio || 1;
+  const text = `X ${Math.round(state.fpv.x)} in  Z ${Math.round(state.fpv.z)} in  Yaw ${formatDegrees(state.fpv.yaw)}  Pitch ${formatDegrees(state.fpv.pitch)}`;
+  ctx.save();
+  ctx.fillStyle = "rgba(23, 27, 31, 0.72)";
+  ctx.fillRect(14 * dpr, 14 * dpr, 340 * dpr, 30 * dpr);
+  ctx.fillStyle = "#ffffff";
+  ctx.font = `${12 * dpr}px Inter, sans-serif`;
+  ctx.textBaseline = "middle";
+  ctx.fillText(text, 24 * dpr, 30 * dpr);
+  ctx.restore();
 }
 
 function renderSummary() {

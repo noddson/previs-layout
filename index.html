@@ -115,6 +115,17 @@
         </div>
         <canvas id="previewCanvas" width="1400" height="520"></canvas>
       </section>
+
+      <section class="preview-area fpv-area" aria-label="First person layout preview">
+        <div class="canvas-header">
+          <div>
+            <h2>FPV View</h2>
+            <p id="fpvReadout">Click view, WASD to move, mouse to look</p>
+          </div>
+          <div class="scale-pill" id="fpvStatus">Ground locked</div>
+        </div>
+        <canvas id="fpvCanvas" width="1400" height="520" tabindex="0"></canvas>
+      </section>
     </main>
 
     <script src="app.js"></script>
