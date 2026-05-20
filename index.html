@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Previs Box Layout</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Previs Layout</p>
+          <h1>Box Wall Planner</h1>
+        </div>
+        <div class="topbar-actions">
+          <button id="undoButton" type="button">Undo</button>
+          <button id="demoButton" type="button">Demo</button>
+          <button id="clearButton" type="button">Clear</button>
+        </div>
+      </header>
+
+      <section class="workspace">
+        <aside class="panel controls-panel" aria-label="Layout controls">
+          <div class="control-group">
+            <h2>Draw</h2>
+            <div class="segmented" role="group" aria-label="Drawing tool">
+              <button class="is-active" data-tool="wall" type="button">Wall</button>
+              <button data-tool="room" type="button">Room</button>
+              <button data-tool="erase" type="button">Erase</button>
+            </div>
+          </div>
+
+          <div class="control-group">
+            <h2>Box</h2>
+            <label>
+              Type
+              <select id="boxType"></select>
+            </label>
+            <label>
+              Cost per box
+              <input id="boxCost" min="0" step="0.25" type="number" />
+            </label>
+            <label>
+              Wall height
+              <div class="inline-input">
+                <input id="wallHeight" min="12" step="6" type="number" value="72" />
+                <span>in</span>
+              </div>
+            </label>
+          </div>
+
+          <div class="control-group">
+            <h2>Grid</h2>
+            <label>
+              Snap
+              <div class="inline-input">
+                <input id="snapSize" min="6" step="6" type="number" value="12" />
+                <span>in</span>
+              </div>
+            </label>
+            <label>
+              Stage size
+              <div class="inline-input two-up">
+                <input id="stageWidth" min="96" step="12" type="number" value="480" aria-label="Stage width in inches" />
+                <input id="stageDepth" min="96" step="12" type="number" value="360" aria-label="Stage depth in inches" />
+              </div>
+            </label>
+          </div>
+
+        </aside>
+
+        <section class="canvas-area" aria-label="Top down layout editor">
+          <div class="canvas-header">
+            <div>
+              <h2>Plan</h2>
+              <p id="planReadout">0 walls</p>
+            </div>
+            <div class="scale-pill" id="scaleReadout">1 square = 6 in</div>
+          </div>
+          <canvas id="planCanvas" width="980" height="720"></canvas>
+        </section>
+
+        <aside class="panel summary-panel" aria-label="Layout summary">
+          <section class="summary-hero">
+            <div>
+              <p>Boxes</p>
+              <strong id="totalBoxes">0</strong>
+            </div>
+            <div>
+              <p>Cost</p>
+              <strong id="totalCost">$0</strong>
+            </div>
+          </section>
+
+          <section class="breakdown">
+            <h2>Box Count</h2>
+            <div id="boxBreakdown" class="breakdown-list"></div>
+          </section>
+
+          <section class="breakdown">
+            <h2>Wall Runs</h2>
+            <div id="wallList" class="wall-list"></div>
+          </section>
+        </aside>
+      </section>
+
+      <section class="preview-area" aria-label="3D layout preview">
+        <div class="canvas-header">
+          <div>
+            <h2>Orbit Preview</h2>
+            <p id="previewReadout">Drag to rotate, wheel to zoom, click axis labels to snap</p>
+          </div>
+          <div class="scale-pill" id="heightReadout">8 ft high</div>
+        </div>
+        <canvas id="previewCanvas" width="1400" height="520"></canvas>
+      </section>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>
