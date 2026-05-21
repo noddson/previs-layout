@@ -75,6 +75,28 @@
             </label>
           </div>
 
+          <div class="control-group build-time-panel">
+            <h2>Build Time</h2>
+            <label>
+              Builders
+              <input id="builderCount" min="1" max="99" step="1" type="number" value="1" />
+            </label>
+            <div class="build-time-total">
+              <span>Total time</span>
+              <strong id="totalBuildTime">0 min</strong>
+            </div>
+            <div class="build-time-split">
+              <div>
+                <span>Build boxes</span>
+                <strong id="boxBuildTime">0 min</strong>
+              </div>
+              <div>
+                <span>Position boxes</span>
+                <strong id="boxPositionTime">0 min</strong>
+              </div>
+            </div>
+          </div>
+
         </aside>
 
         <section class="canvas-area" aria-label="Top down layout editor">
@@ -132,6 +154,7 @@
           <div class="fpv-header-actions">
             <div id="fpvVrButton"></div>
             <div class="scale-pill" id="fpvStatus">Ground locked</div>
+            <div class="scale-pill xr-status" id="fpvXrStatus" hidden></div>
           </div>
         </div>
         <canvas id="fpvCanvas" width="1400" height="520" tabindex="0"></canvas>

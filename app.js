@@ -33,6 +33,7 @@ const DEFAULT_BOX_TYPES = [
 const DEFAULT_CONFIG = {
   defaultWallHeight: 72,
   defaultGridSnap: 12,
+  defaultBuilderCount: 1,
   defaultStageSize: {
     width: 480,
     depth: 360,
@@ -71,6 +72,7 @@ const state = {
   drag: null,
   blockedReason: null,
   axisTargets: [],
+  hoveredWallId: null,
   orbit: {
     yaw: 210,
     pitch: 340,
@@ -104,6 +106,10 @@ const els = {
   snapSize: document.querySelector("#snapSize"),
   stageWidth: document.querySelector("#stageWidth"),
   stageDepth: document.querySelector("#stageDepth"),
+  builderCount: document.querySelector("#builderCount"),
+  totalBuildTime: document.querySelector("#totalBuildTime"),
+  boxBuildTime: document.querySelector("#boxBuildTime"),
+  boxPositionTime: document.querySelector("#boxPositionTime"),
   totalBoxes: document.querySelector("#totalBoxes"),
   totalCost: document.querySelector("#totalCost"),
   boxBreakdown: document.querySelector("#boxBreakdown"),
@@ -114,6 +120,7 @@ const els = {
   previewReadout: document.querySelector("#previewReadout"),
   fpvReadout: document.querySelector("#fpvReadout"),
   fpvStatus: document.querySelector("#fpvStatus"),
+  fpvXrStatus: document.querySelector("#fpvXrStatus"),
   fpvVrButton: document.querySelector("#fpvVrButton"),
   undoButton: document.querySelector("#undoButton"),
   demoButton: document.querySelector("#demoButton"),
@@ -224,6 +231,14 @@ function normalizeConfig(source) {
   return {
     defaultWallHeight: clamp(Number(source?.defaultWallHeight ?? source?.wallHeight) || DEFAULT_CONFIG.defaultWallHeight, 12, 360),
     defaultGridSnap: clamp(Number(source?.defaultGridSnap ?? source?.gridSnap) || DEFAULT_CONFIG.defaultGridSnap, 3, 96),
+    defaultBuilderCount: clamp(
+      Math.round(
+        Number(source?.defaultBuilderCount ?? source?.builderCount ?? source?.buildPersonCount) ||
+          DEFAULT_CONFIG.defaultBuilderCount,
+      ),
+      1,
+      99,
+    ),
     defaultStageSize: {
       width: clamp(Number(stage.width) || DEFAULT_CONFIG.defaultStageSize.width, 96, MAX_STAGE_SIZE),
       depth: clamp(Number(stage.depth) || DEFAULT_CONFIG.defaultStageSize.depth, 96, MAX_STAGE_SIZE),
@@ -246,6 +261,7 @@ function populateBoxOptions(selectedId = BOX_TYPES[0].id) {
 function applyDefaultConfig() {
   els.wallHeight.value = appConfig.defaultWallHeight;
   els.snapSize.value = appConfig.defaultGridSnap;
+  els.builderCount.value = appConfig.defaultBuilderCount;
   els.stageWidth.value = appConfig.defaultStageSize.width;
   els.stageDepth.value = appConfig.defaultStageSize.depth;
 }
@@ -273,6 +289,7 @@ function bindEvents() {
   [els.wallHeight, els.snapSize].forEach((input) =>
     input.addEventListener("input", renderAll),
   );
+  els.builderCount.addEventListener("input", renderSummary);
   [els.stageWidth, els.stageDepth].forEach((input) =>
     input.addEventListener("input", () => {
       resetFpvToSpawn();
@@ -350,6 +367,10 @@ function getWallHeight() {
   return clamp(Number(els.wallHeight.value) || 72, 12, 360);
 }
 
+function getBuilderCount() {
+  return clamp(Math.round(Number(els.builderCount.value) || DEFAULT_CONFIG.defaultBuilderCount), 1, 99);
+}
+
 function getActiveCost() {
   return Math.max(0, Number(els.boxCost.value) || 0);
 }
@@ -404,6 +425,7 @@ function savePlan() {
     config: {
       defaultWallHeight: getWallHeight(),
       defaultGridSnap: getSnap(),
+      defaultBuilderCount: getBuilderCount(),
       defaultStageSize: getStage(),
     },
     walls: state.walls.map(serializeWall),
@@ -468,7 +490,10 @@ function parsePlanJson(source) {
   return {
     boxTypes: importedBoxes,
     selectedBoxId: String(plan.selectedBoxId || importedBoxes[0].id),
-    config: normalizeConfig(plan.config),
+    config: normalizeConfig({
+      ...plan.config,
+      defaultBuilderCount: plan.config?.defaultBuilderCount ?? plan.builderCount ?? plan.buildPersonCount,
+    }),
     walls,
   };
 }
@@ -779,6 +804,8 @@ function drawPlan() {
   planCtx.clearRect(0, 0, els.planCanvas.width, els.planCanvas.height);
   drawPlanBackground();
   state.walls.forEach((wall) => drawPlanWall(wall, false));
+  const hoveredWall = state.walls.find((wall) => wall.id === state.hoveredWallId);
+  if (hoveredWall) drawPlanWallHighlight(hoveredWall);
   drawRoomLabels(state.walls, false);
 
   if (state.drag) {
@@ -850,6 +877,34 @@ function drawPlanWall(wall, isPreview, isBlocked = false) {
   planCtx.textAlign = "center";
   planCtx.textBaseline = "middle";
   planCtx.fillText(`${label.count}`, mid.x, mid.y);
+  planCtx.restore();
+}
+
+function drawPlanWallHighlight(wall) {
+  const dpr = window.devicePixelRatio || 1;
+  const footprints = generateFootprints(wall);
+  planCtx.save();
+  planCtx.setLineDash([7 * dpr, 4 * dpr]);
+  footprints.forEach((footprint) => {
+    const rect = footprintToPlanRect(footprint);
+    const padding = 3 * dpr;
+    planCtx.strokeStyle = "#172026";
+    planCtx.lineWidth = 6 * dpr;
+    planCtx.strokeRect(
+      rect.x - padding,
+      rect.y - padding,
+      rect.w + padding * 2,
+      rect.h + padding * 2,
+    );
+    planCtx.strokeStyle = "#f2b441";
+    planCtx.lineWidth = 3 * dpr;
+    planCtx.strokeRect(
+      rect.x - padding,
+      rect.y - padding,
+      rect.w + padding * 2,
+      rect.h + padding * 2,
+    );
+  });
   planCtx.restore();
 }
 
@@ -1451,10 +1506,7 @@ async function initFpvRenderer() {
   fpvRenderer.xr.addEventListener("sessionstart", updateFpvStatus);
   fpvRenderer.xr.addEventListener("sessionend", updateFpvStatus);
 
-  if (VRButton && els.fpvVrButton) {
-    fpvVrButton = VRButton.createButton(fpvRenderer);
-    els.fpvVrButton.replaceChildren(fpvVrButton);
-  }
+  await configureFpvVrButton();
 
   state.fpv.rendererReady = true;
   resizeFpvRenderer();
@@ -1707,6 +1759,37 @@ function updateFpvStatus() {
   }
 }
 
+async function configureFpvVrButton() {
+  if (!els.fpvXrStatus) return;
+  els.fpvVrButton?.replaceChildren();
+
+  if (!("xr" in navigator)) {
+    els.fpvXrStatus.hidden = false;
+    els.fpvXrStatus.textContent = window.isSecureContext ? "WebXR unavailable" : "WebXR needs HTTPS";
+    return;
+  }
+
+  try {
+    const supported = await navigator.xr.isSessionSupported("immersive-vr");
+    if (!supported) {
+      els.fpvXrStatus.hidden = false;
+      els.fpvXrStatus.textContent = "VR not supported";
+      return;
+    }
+  } catch {
+    els.fpvXrStatus.hidden = false;
+    els.fpvXrStatus.textContent = "VR not allowed";
+    return;
+  }
+
+  els.fpvXrStatus.hidden = true;
+  els.fpvXrStatus.textContent = "";
+  if (VRButton && els.fpvVrButton) {
+    fpvVrButton = VRButton.createButton(fpvRenderer);
+    els.fpvVrButton.replaceChildren(fpvVrButton);
+  }
+}
+
 function clearFpvKeys() {
   state.fpv.keys = {};
 }
@@ -1813,6 +1896,7 @@ function renderSummary() {
 
   renderBreakdown(totals.byType);
   renderWallList();
+  renderBuildTime(totals.boxes);
 }
 
 function summarizeLayout() {
@@ -1885,8 +1969,11 @@ function renderWallList() {
     const title = document.createElement("span");
     const meta = document.createElement("span");
     const value = document.createElement("span");
+    const deleteButton = document.createElement("button");
 
     row.className = "wall-row";
+    row.addEventListener("mouseenter", () => setHoveredWallRun(wall.id));
+    row.addEventListener("mouseleave", () => setHoveredWallRun(null));
     swatch.className = "swatch";
     swatch.style.backgroundColor = box.color;
     title.className = "row-title";
@@ -1895,11 +1982,61 @@ function renderWallList() {
     meta.textContent = `${formatFeetInches(metrics.length)} long, ${formatFeetInches(wall.height)} high, ${formatMoney(metrics.cost)}`;
     value.className = "row-value";
     value.textContent = metrics.count.toLocaleString();
+    deleteButton.className = "wall-delete-button";
+    deleteButton.type = "button";
+    deleteButton.title = `Delete Run ${index + 1}`;
+    deleteButton.setAttribute("aria-label", `Delete Run ${index + 1}`);
+    deleteButton.append(createTrashIcon());
+    deleteButton.addEventListener("click", (event) => {
+      event.stopPropagation();
+      deleteWallRun(wall.id);
+    });
 
     title.append(meta);
-    row.append(swatch, title, value);
+    row.append(swatch, title, value, deleteButton);
     els.wallList.append(row);
   });
+}
+
+function setHoveredWallRun(wallId) {
+  if (state.hoveredWallId === wallId) return;
+  state.hoveredWallId = wallId;
+  drawPlan();
+}
+
+function deleteWallRun(wallId) {
+  if (!state.walls.some((wall) => wall.id === wallId)) return;
+  pushHistory();
+  state.walls = state.walls.filter((wall) => wall.id !== wallId);
+  state.hoveredWallId = null;
+  resetFpvToSpawn();
+  renderAll();
+}
+
+function createTrashIcon() {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("aria-hidden", "true");
+  [
+    ["path", { d: "M3 6h18" }],
+    ["path", { d: "M8 6V4h8v2" }],
+    ["path", { d: "M19 6l-1 14H6L5 6" }],
+    ["path", { d: "M10 11v5" }],
+    ["path", { d: "M14 11v5" }],
+  ].forEach(([tag, attributes]) => {
+    const element = document.createElementNS("http://www.w3.org/2000/svg", tag);
+    Object.entries(attributes).forEach(([name, value]) => element.setAttribute(name, value));
+    svg.append(element);
+  });
+  return svg;
+}
+
+function renderBuildTime(boxCount) {
+  const builders = getBuilderCount();
+  const totalMinutes = boxCount / builders;
+  els.totalBuildTime.textContent = formatMinutes(totalMinutes);
+  els.boxBuildTime.textContent = formatMinutes(totalMinutes * 0.6);
+  els.boxPositionTime.textContent = formatMinutes(totalMinutes * 0.4);
 }
 
 function createEmptyState(message) {
@@ -1915,6 +2052,11 @@ function formatMoney(value) {
     currency: "USD",
     maximumFractionDigits: 0,
   }).format(value);
+}
+
+function formatMinutes(value) {
+  const rounded = Math.round(value * 10) / 10;
+  return `${Number.isInteger(rounded) ? rounded : rounded.toFixed(1)} min`;
 }
 
 function formatFeetInches(inches) {

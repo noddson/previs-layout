@@ -1,6 +1,7 @@
 {
   "defaultWallHeight": 72,
   "defaultGridSnap": 12,
+  "defaultBuilderCount": 1,
   "defaultStageSize": {
     "width": 480,
     "depth": 360
