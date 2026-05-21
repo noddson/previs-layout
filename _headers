@@ -1,3 +1,7 @@
 /*
   Content-Security-Policy: default-src 'self'; script-src 'self'; connect-src 'self'; img-src 'self' data: blob:; object-src 'none'; base-uri 'none'; form-action 'none'; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'
   X-Frame-Options: DENY
+  Strict-Transport-Security: max-age=31536000
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: accelerometer=(self), autoplay=(), camera=(), geolocation=(), gyroscope=(self), magnetometer=(), microphone=(), payment=(), usb=(), xr-spatial-tracking=(self), browsing-topics=()
