@@ -19,6 +19,15 @@
       "color": "#d88a12"
     },
     {
+      "id": "cube12",
+      "name": "12 x 12 x 12 cube",
+      "length": 12,
+      "depth": 12,
+      "height": 12,
+      "cost": 1.29,
+      "color": "#c74461"
+    },
+    {
       "id": "tall18",
       "name": "18 x 18 x 24 high",
       "length": 18,
