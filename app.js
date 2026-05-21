@@ -51,6 +51,8 @@ const MAX_REMOVED_BLOCKS = 2000;
 const MAX_STRING_LENGTH = 80;
 const MAX_BOX_DIMENSION = 2400;
 const MAX_STAGE_SIZE = 2400;
+const XR_THUMBSTICK_DEADZONE = 0.15;
+const XR_TURN_DEGREES_PER_SECOND = 120;
 
 let THREE = null;
 let VRButton = null;
@@ -1575,49 +1577,71 @@ function updateDesktopFpv(dt) {
 }
 
 function updateXrFpv(dt) {
-  const axes = getXrMoveAxes();
-  if (!axes) return false;
+  const controls = getXrThumbstickControls();
+  if (!controls) return false;
 
-  const xrDirection = new THREE.Vector3();
-  fpvRenderer.xr.getCamera(fpvCamera).getWorldDirection(xrDirection);
-  xrDirection.y = 0;
-  if (xrDirection.lengthSq() < 0.0001) return false;
-  xrDirection.normalize();
+  let didUpdate = false;
 
-  const xrRight = new THREE.Vector3().crossVectors(new THREE.Vector3(0, 1, 0), xrDirection).normalize();
-  const moveRenderX = xrRight.x * axes.x + xrDirection.x * axes.y;
-  const moveRenderZ = xrRight.z * axes.x + xrDirection.z * axes.y;
-  const magnitude = Math.hypot(moveRenderX, moveRenderZ);
-  if (!magnitude) return false;
+  if (controls.turn && Math.abs(controls.turn.x) > XR_THUMBSTICK_DEADZONE) {
+    state.fpv.yaw -= controls.turn.x * XR_TURN_DEGREES_PER_SECOND * dt;
+    didUpdate = true;
+  }
 
-  const step = state.fpv.speed * dt;
-  tryMoveFpv((moveRenderX / magnitude) * step, (moveRenderZ / magnitude) * step);
-  return true;
+  if (controls.move && Math.hypot(controls.move.x, controls.move.y) > XR_THUMBSTICK_DEADZONE) {
+    const xrDirection = new THREE.Vector3();
+    fpvRenderer.xr.getCamera(fpvCamera).getWorldDirection(xrDirection);
+    xrDirection.y = 0;
+    if (xrDirection.lengthSq() >= 0.0001) {
+      xrDirection.normalize();
+
+      const xrRight = new THREE.Vector3().crossVectors(new THREE.Vector3(0, 1, 0), xrDirection).normalize();
+      const moveRenderX = xrRight.x * controls.move.x + xrDirection.x * controls.move.y;
+      const moveRenderZ = xrRight.z * controls.move.x + xrDirection.z * controls.move.y;
+      const magnitude = Math.hypot(moveRenderX, moveRenderZ);
+      if (magnitude) {
+        const step = state.fpv.speed * dt;
+        tryMoveFpv((moveRenderX / magnitude) * step, (moveRenderZ / magnitude) * step);
+        didUpdate = true;
+      }
+    }
+  }
+
+  return didUpdate;
 }
 
-function getXrMoveAxes() {
+function getXrThumbstickControls() {
   if (!fpvRenderer?.xr.isPresenting) return null;
   const session = fpvRenderer.xr.getSession();
   if (!session) return null;
 
+  const controls = {
+    move: null,
+    turn: null,
+  };
+
   for (const source of session.inputSources) {
     const gamepad = source.gamepad;
     if (!gamepad?.axes?.length) continue;
-    const axisPair = getGamepadAxisPair(gamepad.axes);
-    if (Math.hypot(axisPair.x, axisPair.y) > 0.15) return axisPair;
+    const axisPair = getGamepadThumbstickAxes(gamepad.axes);
+    if (!axisPair) continue;
+    if (source.handedness === "left") {
+      controls.move = axisPair;
+    } else if (source.handedness === "right") {
+      controls.turn = axisPair;
+    }
   }
 
-  return null;
+  return controls.move || controls.turn ? controls : null;
 }
 
-function getGamepadAxisPair(axes) {
+function getGamepadThumbstickAxes(axes) {
   const primary = {
     x: axes[0] || 0,
-    y: axes[1] || 0,
+    y: -(axes[1] || 0),
   };
   const secondary = {
     x: axes[2] || 0,
-    y: axes[3] || 0,
+    y: -(axes[3] || 0),
   };
   return Math.hypot(secondary.x, secondary.y) > Math.hypot(primary.x, primary.y)
     ? secondary
