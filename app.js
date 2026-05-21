@@ -1553,9 +1553,9 @@ function updateXrFpv(dt) {
   if (xrDirection.lengthSq() < 0.0001) return false;
   xrDirection.normalize();
 
-  const xrRight = new THREE.Vector3().crossVectors(xrDirection, new THREE.Vector3(0, 1, 0)).normalize();
-  const moveRenderX = xrRight.x * axes.x + xrDirection.x * -axes.y;
-  const moveRenderZ = xrRight.z * axes.x + xrDirection.z * -axes.y;
+  const xrRight = new THREE.Vector3().crossVectors(new THREE.Vector3(0, 1, 0), xrDirection).normalize();
+  const moveRenderX = xrRight.x * axes.x + xrDirection.x * axes.y;
+  const moveRenderZ = xrRight.z * axes.x + xrDirection.z * axes.y;
   const magnitude = Math.hypot(moveRenderX, moveRenderZ);
   if (!magnitude) return false;
 
