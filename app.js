@@ -41,13 +41,8 @@ const DEFAULT_CONFIG = {
 
 const THREE_MODULE_URL = "./vendor/three/build/three.module.js";
 const VR_BUTTON_MODULE_URL = "./vendor/three/examples/jsm/webxr/VRButton.js";
-const LINE_SEGMENTS_2_MODULE_URL = "./vendor/three/examples/jsm/lines/LineSegments2.js";
-const LINE_SEGMENTS_GEOMETRY_MODULE_URL =
-  "./vendor/three/examples/jsm/lines/LineSegmentsGeometry.js";
-const LINE_MATERIAL_MODULE_URL = "./vendor/three/examples/jsm/lines/LineMaterial.js";
 const INCH_TO_METER = 0.0254;
 const BOX_EDGE_COLOR = 0x000000;
-const BOX_EDGE_WIDTH_PX = 5;
 const MAX_IMPORTED_FILE_BYTES = 1_000_000;
 const MAX_BOX_TYPES = 50;
 const MAX_WALLS = 2000;
@@ -58,9 +53,6 @@ const MAX_STAGE_SIZE = 2400;
 
 let THREE = null;
 let VRButton = null;
-let LineSegments2 = null;
-let LineSegmentsGeometry = null;
-let LineMaterial = null;
 let fpvRenderer = null;
 let fpvScene = null;
 let fpvCamera = null;
@@ -1413,24 +1405,12 @@ function onPreviewWheel(event) {
 
 async function initFpvRenderer() {
   try {
-    const [
-      threeModule,
-      vrButtonModule,
-      lineSegments2Module,
-      lineSegmentsGeometryModule,
-      lineMaterialModule,
-    ] = await Promise.all([
+    const [threeModule, vrButtonModule] = await Promise.all([
       import(THREE_MODULE_URL),
       import(VR_BUTTON_MODULE_URL),
-      import(LINE_SEGMENTS_2_MODULE_URL),
-      import(LINE_SEGMENTS_GEOMETRY_MODULE_URL),
-      import(LINE_MATERIAL_MODULE_URL),
     ]);
     THREE = threeModule;
     VRButton = vrButtonModule.VRButton;
-    LineSegments2 = lineSegments2Module.LineSegments2;
-    LineSegmentsGeometry = lineSegmentsGeometryModule.LineSegmentsGeometry;
-    LineMaterial = lineMaterialModule.LineMaterial;
   } catch (error) {
     state.fpv.rendererReady = false;
     els.fpvStatus.textContent = "WebXR unavailable";
@@ -1490,7 +1470,6 @@ function resizeFpvRenderer() {
   fpvRenderer.setSize(width, height, false);
   fpvCamera.aspect = width / height;
   fpvCamera.updateProjectionMatrix();
-  updateFpvEdgeResolution();
 }
 
 function tickFpv(timestamp, frame) {
@@ -1766,7 +1745,6 @@ function rebuildFpvScene() {
     fpvBoxesGroup.add(mesh);
     fpvBoxesGroup.add(createBoxEdgeOutline(geometry, position));
   });
-  updateFpvEdgeResolution();
 }
 
 function clearThreeGroup(group) {
@@ -1778,29 +1756,14 @@ function clearThreeGroup(group) {
 
 function createBoxEdgeOutline(boxGeometry, position) {
   const edgesGeometry = new THREE.EdgesGeometry(boxGeometry);
-  const lineGeometry = new LineSegmentsGeometry();
-  lineGeometry.setPositions(Array.from(edgesGeometry.attributes.position.array));
-  edgesGeometry.dispose();
-
-  const material = new LineMaterial({
+  const material = new THREE.LineBasicMaterial({
     color: BOX_EDGE_COLOR,
-    linewidth: BOX_EDGE_WIDTH_PX,
   });
-  const outline = new LineSegments2(lineGeometry, material);
+  const outline = new THREE.LineSegments(edgesGeometry, material);
   outline.position.copy(position);
-  outline.computeLineDistances();
   outline.frustumCulled = false;
   outline.renderOrder = 1;
   return outline;
-}
-
-function updateFpvEdgeResolution() {
-  if (!fpvRenderer || !fpvBoxesGroup || !THREE) return;
-  const size = fpvRenderer.getDrawingBufferSize(new THREE.Vector2());
-  fpvBoxesGroup.traverse((object) => {
-    const material = object.material;
-    if (material?.isLineMaterial) material.resolution.set(size.x, size.y);
-  });
 }
 
 function disposeThreeObject(object) {
