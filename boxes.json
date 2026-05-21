@@ -10,6 +10,15 @@
       "color": "#0f8f8a"
     },
     {
+      "id": "tall18",
+      "name": "18 x 18 x 24 high",
+      "length": 18,
+      "depth": 18,
+      "height": 24,
+      "cost": 3.74,
+      "color": "#326fc0"
+    },
+    {
       "id": "cube18",
       "name": "18 x 18 x 18 cube",
       "length": 18,
@@ -26,15 +35,6 @@
       "height": 12,
       "cost": 1.29,
       "color": "#c74461"
-    },
-    {
-      "id": "tall18",
-      "name": "18 x 18 x 24 high",
-      "length": 18,
-      "depth": 18,
-      "height": 24,
-      "cost": 3.74,
-      "color": "#326fc0"
     }
   ]
 }
