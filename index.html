@@ -4,6 +4,13 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Previs Box Layout</title>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.164.1/build/three.module.js"
+        }
+      }
+    </script>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
@@ -14,9 +21,12 @@
           <h1>Box Wall Planner</h1>
         </div>
         <div class="topbar-actions">
+          <button id="saveButton" type="button">Save Plan</button>
+          <button id="importButton" type="button">Import Plan</button>
           <button id="undoButton" type="button">Undo</button>
           <button id="demoButton" type="button">Demo</button>
           <button id="clearButton" type="button">Clear</button>
+          <input id="importFile" class="visually-hidden" type="file" accept="application/json,.json" />
         </div>
       </header>
 
@@ -122,7 +132,10 @@
             <h2>FPV View</h2>
             <p id="fpvReadout">Click view, WASD to move, mouse to look</p>
           </div>
-          <div class="scale-pill" id="fpvStatus">Ground locked</div>
+          <div class="fpv-header-actions">
+            <div id="fpvVrButton"></div>
+            <div class="scale-pill" id="fpvStatus">Ground locked</div>
+          </div>
         </div>
         <canvas id="fpvCanvas" width="1400" height="520" tabindex="0"></canvas>
       </section>

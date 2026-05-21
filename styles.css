@@ -105,10 +105,20 @@ h2 {
   justify-content: flex-end;
 }
 
+.visually-hidden {
+  block-size: 1px;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  inline-size: 1px;
+  overflow: hidden;
+  position: absolute;
+  white-space: nowrap;
+}
+
 .workspace {
   display: grid;
   gap: 14px;
-  grid-template-columns: 270px minmax(460px, 1fr) 320px;
+  grid-template-columns: 270px minmax(460px, 1fr) 380px;
 }
 
 .panel,
@@ -267,6 +277,23 @@ canvas {
   box-shadow: inset 0 0 0 3px rgba(15, 143, 138, 0.45);
 }
 
+.fpv-header-actions {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+#fpvVrButton button {
+  bottom: auto !important;
+  left: auto !important;
+  position: static !important;
+  right: auto !important;
+  top: auto !important;
+  transform: none !important;
+}
+
 .summary-panel {
   align-self: start;
 }
@@ -291,10 +318,11 @@ canvas {
 .summary-hero strong {
   color: #fff;
   display: block;
-  font-size: clamp(1.55rem, 3vw, 2.35rem);
+  font-size: clamp(1.45rem, 2.2vw, 2.15rem);
   line-height: 1;
   margin-top: 7px;
   overflow-wrap: anywhere;
+  white-space: nowrap;
 }
 
 .breakdown {

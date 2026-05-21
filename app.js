@@ -1,4 +1,6 @@
-const BOX_TYPES = [
+const CURRENT_PLAN_VERSION = 1;
+
+const DEFAULT_BOX_TYPES = [
   {
     id: "cube24",
     name: "24 x 24 x 24 cube",
@@ -28,11 +30,48 @@ const BOX_TYPES = [
   },
 ];
 
+const DEFAULT_CONFIG = {
+  defaultWallHeight: 72,
+  defaultGridSnap: 12,
+  defaultStageSize: {
+    width: 480,
+    depth: 360,
+  },
+};
+
+const THREE_MODULE_URL = "https://cdn.jsdelivr.net/npm/three@0.164.1/build/three.module.js";
+const VR_BUTTON_MODULE_URL =
+  "https://cdn.jsdelivr.net/npm/three@0.164.1/examples/jsm/webxr/VRButton.js";
+const LINE_SEGMENTS_2_MODULE_URL =
+  "https://cdn.jsdelivr.net/npm/three@0.164.1/examples/jsm/lines/LineSegments2.js";
+const LINE_SEGMENTS_GEOMETRY_MODULE_URL =
+  "https://cdn.jsdelivr.net/npm/three@0.164.1/examples/jsm/lines/LineSegmentsGeometry.js";
+const LINE_MATERIAL_MODULE_URL =
+  "https://cdn.jsdelivr.net/npm/three@0.164.1/examples/jsm/lines/LineMaterial.js";
+const INCH_TO_METER = 0.0254;
+const BOX_EDGE_COLOR = 0x000000;
+const BOX_EDGE_WIDTH_PX = 5;
+
+let THREE = null;
+let VRButton = null;
+let LineSegments2 = null;
+let LineSegmentsGeometry = null;
+let LineMaterial = null;
+let fpvRenderer = null;
+let fpvScene = null;
+let fpvCamera = null;
+let fpvRig = null;
+let fpvBoxesGroup = null;
+let fpvStageGroup = null;
+let fpvVrButton = null;
+let BOX_TYPES = DEFAULT_BOX_TYPES.map((box) => ({ ...box }));
+let appConfig = { ...DEFAULT_CONFIG, defaultStageSize: { ...DEFAULT_CONFIG.defaultStageSize } };
+
 const state = {
   tool: "wall",
   walls: [],
   history: [],
-  costs: Object.fromEntries(BOX_TYPES.map((box) => [box.id, box.cost])),
+  costs: {},
   drag: null,
   blockedReason: null,
   axisTargets: [],
@@ -55,6 +94,7 @@ const state = {
     dragging: false,
     lastFrame: 0,
     keys: {},
+    rendererReady: false,
   },
 };
 
@@ -78,31 +118,111 @@ const els = {
   previewReadout: document.querySelector("#previewReadout"),
   fpvReadout: document.querySelector("#fpvReadout"),
   fpvStatus: document.querySelector("#fpvStatus"),
+  fpvVrButton: document.querySelector("#fpvVrButton"),
   undoButton: document.querySelector("#undoButton"),
   demoButton: document.querySelector("#demoButton"),
   clearButton: document.querySelector("#clearButton"),
+  saveButton: document.querySelector("#saveButton"),
+  importButton: document.querySelector("#importButton"),
+  importFile: document.querySelector("#importFile"),
 };
 
 const planCtx = els.planCanvas.getContext("2d");
 const previewCtx = els.previewCanvas.getContext("2d");
-const fpvCtx = els.fpvCanvas.getContext("2d");
 let planMetrics = null;
 
-function init() {
+async function init() {
+  await loadAppConfiguration();
+  populateBoxOptions();
+  applyDefaultConfig();
+  bindEvents();
+  addDemoLayout();
+  await initFpvRenderer();
+  resetFpvToSpawn();
+  renderAll();
+}
+
+async function loadAppConfiguration() {
+  const [boxesJson, configJson] = await Promise.all([
+    fetchJson("boxes.json"),
+    fetchJson("config.json"),
+  ]);
+  BOX_TYPES = normalizeBoxes(boxesJson);
+  appConfig = normalizeConfig(configJson);
+  state.costs = Object.fromEntries(BOX_TYPES.map((box) => [box.id, box.cost]));
+}
+
+async function fetchJson(path) {
+  try {
+    const response = await fetch(path, { cache: "no-store" });
+    if (!response.ok) throw new Error(`${path} returned ${response.status}`);
+    return await response.json();
+  } catch (error) {
+    console.warn(`Using built-in defaults because ${path} could not be loaded.`, error);
+    return null;
+  }
+}
+
+function normalizeBoxes(source) {
+  const candidates = Array.isArray(source) ? source : source?.boxes;
+  const boxes = [];
+  const ids = new Set();
+
+  (Array.isArray(candidates) ? candidates : DEFAULT_BOX_TYPES).forEach((box, index) => {
+    const id = String(box?.id || `box-${index + 1}`).trim();
+    const length = Number(box?.length);
+    const depth = Number(box?.depth);
+    const height = Number(box?.height);
+    if (!id || ids.has(id) || length <= 0 || depth <= 0 || height <= 0) return;
+    ids.add(id);
+    boxes.push({
+      id,
+      name: String(box?.name || id).trim(),
+      length,
+      depth,
+      height,
+      cost: Math.max(0, Number(box?.cost) || 0),
+      color: normalizeColor(box?.color, DEFAULT_BOX_TYPES[index % DEFAULT_BOX_TYPES.length].color),
+    });
+  });
+
+  return boxes.length ? boxes : DEFAULT_BOX_TYPES.map((box) => ({ ...box }));
+}
+
+function normalizeColor(value, fallback) {
+  const color = String(value || "").trim();
+  return /^#[0-9a-f]{6}$/i.test(color) ? color : fallback;
+}
+
+function normalizeConfig(source) {
+  const stage = source?.defaultStageSize || source?.stage || {};
+  return {
+    defaultWallHeight: clamp(Number(source?.defaultWallHeight ?? source?.wallHeight) || DEFAULT_CONFIG.defaultWallHeight, 12, 360),
+    defaultGridSnap: clamp(Number(source?.defaultGridSnap ?? source?.gridSnap) || DEFAULT_CONFIG.defaultGridSnap, 3, 96),
+    defaultStageSize: {
+      width: clamp(Number(stage.width) || DEFAULT_CONFIG.defaultStageSize.width, 96, 2400),
+      depth: clamp(Number(stage.depth) || DEFAULT_CONFIG.defaultStageSize.depth, 96, 2400),
+    },
+  };
+}
+
+function populateBoxOptions(selectedId = BOX_TYPES[0].id) {
+  els.boxType.replaceChildren();
   BOX_TYPES.forEach((box) => {
     const option = document.createElement("option");
     option.value = box.id;
     option.textContent = box.name;
     els.boxType.append(option);
   });
-  els.boxType.value = BOX_TYPES[0].id;
-  els.boxCost.value = BOX_TYPES[0].cost;
+  els.boxType.value = BOX_TYPES.some((box) => box.id === selectedId) ? selectedId : BOX_TYPES[0].id;
+  els.boxCost.value = getBoxCost(els.boxType.value);
+}
 
-  bindEvents();
-  addDemoLayout();
-  resetFpvToSpawn();
-  renderAll();
-  requestAnimationFrame(tickFpv);
+function applyDefaultConfig() {
+  els.wallHeight.value = appConfig.defaultWallHeight;
+  els.snapSize.value = appConfig.defaultGridSnap;
+  els.stageWidth.value = appConfig.defaultStageSize.width;
+  els.stageDepth.value = appConfig.defaultStageSize.depth;
 }
 
 function bindEvents() {
@@ -150,6 +270,12 @@ function bindEvents() {
     resetFpvToSpawn();
     renderAll();
   });
+  els.saveButton.addEventListener("click", savePlan);
+  els.importButton.addEventListener("click", () => {
+    els.importFile.value = "";
+    els.importFile.click();
+  });
+  els.importFile.addEventListener("change", importSelectedPlan);
 
   els.planCanvas.addEventListener("pointerdown", onPlanPointerDown);
   els.planCanvas.addEventListener("pointermove", onPlanPointerMove);
@@ -225,14 +351,167 @@ function undo() {
 }
 
 function addDemoLayout() {
+  const primaryBox = BOX_TYPES[0].id;
+  const secondaryBox = BOX_TYPES[1]?.id || primaryBox;
   state.walls = [
-    makeWall(96, 72, 384, 72, 120, "cube24"),
-    makeWall(360, 96, 360, 240, 120, "cube24"),
-    makeWall(96, 240, 384, 240, 120, "cube24"),
-    makeWall(96, 96, 96, 240, 120, "cube24"),
-    makeWall(216, 264, 216, 336, 72, "cube18"),
-    makeWall(276, 264, 276, 336, 72, "cube18"),
+    makeWall(96, 72, 384, 72, 120, primaryBox),
+    makeWall(360, 96, 360, 240, 120, primaryBox),
+    makeWall(96, 240, 384, 240, 120, primaryBox),
+    makeWall(96, 96, 96, 240, 120, primaryBox),
+    makeWall(216, 264, 216, 336, 72, secondaryBox),
+    makeWall(276, 264, 276, 336, 72, secondaryBox),
   ];
+}
+
+function savePlan() {
+  const plan = {
+    version: CURRENT_PLAN_VERSION,
+    app: "previs-layout",
+    savedAt: new Date().toISOString(),
+    boxTypes: BOX_TYPES.map((box) => ({ ...box, cost: getBoxCost(box.id) })),
+    selectedBoxId: els.boxType.value,
+    config: {
+      defaultWallHeight: getWallHeight(),
+      defaultGridSnap: getSnap(),
+      defaultStageSize: getStage(),
+    },
+    walls: state.walls.map(serializeWall),
+  };
+  downloadJson(plan, `previs-layout-${formatDateForFilename(new Date())}.json`);
+}
+
+function serializeWall(wall) {
+  return {
+    id: wall.id,
+    x1: wall.x1,
+    y1: wall.y1,
+    x2: wall.x2,
+    y2: wall.y2,
+    height: wall.height,
+    boxId: wall.boxId,
+    removedBlocks: normalizeRemovedBlocks(wall.removedBlocks),
+    roomLabel: wall.roomLabel ? { ...wall.roomLabel } : undefined,
+  };
+}
+
+function downloadJson(data, filename) {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function formatDateForFilename(date) {
+  return date.toISOString().slice(0, 19).replace(/[:T]/g, "-");
+}
+
+async function importSelectedPlan(event) {
+  const file = event.target.files?.[0];
+  if (!file) return;
+
+  try {
+    const plan = parsePlanJson(JSON.parse(await file.text()));
+    pushHistory();
+    applyImportedPlan(plan);
+  } catch (error) {
+    window.alert(error.message || "That plan JSON could not be imported.");
+  } finally {
+    event.target.value = "";
+  }
+}
+
+function parsePlanJson(source) {
+  const plan = upgradePlan(source);
+  const importedBoxes = normalizeBoxes(plan.boxTypes || plan.boxes);
+  const boxIds = new Set(importedBoxes.map((box) => box.id));
+  const walls = normalizeImportedWalls(plan.walls, boxIds);
+
+  return {
+    boxTypes: importedBoxes,
+    selectedBoxId: String(plan.selectedBoxId || importedBoxes[0].id),
+    config: normalizeConfig(plan.config),
+    walls,
+  };
+}
+
+function upgradePlan(source) {
+  if (!source || typeof source !== "object") {
+    throw new Error("Plan import failed: JSON root must be an object.");
+  }
+  if (source.version !== CURRENT_PLAN_VERSION) {
+    throw new Error(`Plan import failed: version ${source.version || "unknown"} is not supported yet.`);
+  }
+  if (!Array.isArray(source.walls)) {
+    throw new Error("Plan import failed: missing walls array.");
+  }
+  return source;
+}
+
+function normalizeImportedWalls(walls, boxIds) {
+  return walls.map((wall) => {
+    const boxId = String(wall?.boxId || "");
+    if (!boxIds.has(boxId)) throw new Error(`Plan import failed: unknown box type "${boxId}".`);
+    return {
+      id: String(wall.id || `${Date.now()}-${Math.random().toString(16).slice(2)}`),
+      x1: finiteNumber(wall.x1, "x1"),
+      y1: finiteNumber(wall.y1, "y1"),
+      x2: finiteNumber(wall.x2, "x2"),
+      y2: finiteNumber(wall.y2, "y2"),
+      height: clamp(finiteNumber(wall.height, "height"), 12, 360),
+      boxId,
+      removedBlocks: normalizeRemovedBlocks(wall.removedBlocks),
+      roomLabel: normalizeRoomLabel(wall.roomLabel),
+    };
+  });
+}
+
+function finiteNumber(value, label) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) throw new Error(`Plan import failed: invalid ${label}.`);
+  return number;
+}
+
+function normalizeRemovedBlocks(blocks) {
+  if (!Array.isArray(blocks)) return [];
+  const indexes = blocks
+    .map((block) => {
+      if (Number.isInteger(block)) return block;
+      if (Number.isInteger(Number(block))) return Number(block);
+      if (Number.isInteger(Number(block?.blockIndex))) return Number(block.blockIndex);
+      return null;
+    })
+    .filter((index) => index !== null && index >= 0);
+  return [...new Set(indexes)].sort((a, b) => a - b);
+}
+
+function normalizeRoomLabel(label) {
+  if (!label || typeof label !== "object") return undefined;
+  const normalized = {
+    x: Number(label.x),
+    y: Number(label.y),
+    width: Number(label.width),
+    depth: Number(label.depth),
+  };
+  return Object.values(normalized).every(Number.isFinite) ? normalized : undefined;
+}
+
+function applyImportedPlan(plan) {
+  BOX_TYPES = plan.boxTypes;
+  appConfig = plan.config;
+  state.costs = Object.fromEntries(BOX_TYPES.map((box) => [box.id, box.cost]));
+  populateBoxOptions(plan.selectedBoxId);
+  applyDefaultConfig();
+  if (BOX_TYPES.some((box) => box.id === plan.selectedBoxId)) els.boxType.value = plan.selectedBoxId;
+  els.boxCost.value = getBoxCost(els.boxType.value);
+  state.walls = plan.walls;
+  state.blockedReason = null;
+  resetFpvToSpawn();
+  renderAll();
 }
 
 function makeWall(x1, y1, x2, y2, height, boxId) {
@@ -251,11 +530,12 @@ function makeWall(x1, y1, x2, y2, height, boxId) {
 function renderAll() {
   resizeCanvasToDisplay(els.planCanvas);
   resizeCanvasToDisplay(els.previewCanvas);
-  resizeCanvasToDisplay(els.fpvCanvas);
+  resizeFpvRenderer();
   clampFpvToStage();
   drawPlan();
   drawPreview();
-  drawFpv();
+  rebuildFpvScene();
+  renderFpvFrame();
   renderSummary();
 }
 
@@ -392,12 +672,21 @@ function buildWallsFromDrag(start, end) {
     const sideY = y1 + box.depth;
     const bottomY = sideY + interiorDepth;
 
-    return [
+    const interiorWidth = Math.max(0, width - box.depth * 2);
+    const roomLabel = {
+      x: x1 + box.depth + interiorWidth / 2,
+      y: sideY + interiorDepth / 2,
+      width: interiorWidth,
+      depth: interiorDepth,
+    };
+    const walls = [
       makeWall(x1, y1, x2, y1, height, box.id),
       makeWall(sideX, sideY, sideX, bottomY, height, box.id),
       makeWall(x1, bottomY, x2, bottomY, height, box.id),
       makeWall(x1, sideY, x1, bottomY, height, box.id),
     ];
+    walls[0].roomLabel = roomLabel;
+    return walls;
   }
 
   return [];
@@ -444,12 +733,14 @@ function drawPlan() {
   planCtx.clearRect(0, 0, els.planCanvas.width, els.planCanvas.height);
   drawPlanBackground();
   state.walls.forEach((wall) => drawPlanWall(wall, false));
+  drawRoomLabels(state.walls, false);
 
   if (state.drag) {
     const previewWalls = buildWallsFromDrag(state.drag.start, state.drag.current);
     const placement = validatePlacement(previewWalls);
     state.blockedReason = previewWalls.length && !placement.ok ? placement.reason : null;
     previewWalls.forEach((wall) => drawPlanWall(wall, true, !placement.ok));
+    drawRoomLabels(previewWalls, !placement.ok);
   }
   drawPlanStatus();
 }
@@ -513,6 +804,46 @@ function drawPlanWall(wall, isPreview, isBlocked = false) {
   planCtx.textAlign = "center";
   planCtx.textBaseline = "middle";
   planCtx.fillText(`${label.count}`, mid.x, mid.y);
+  planCtx.restore();
+}
+
+function drawRoomLabels(walls, isBlocked) {
+  walls
+    .filter((wall) => wall.roomLabel)
+    .forEach((wall) => drawRoomLabel(wall.roomLabel, isBlocked));
+}
+
+function drawRoomLabel(label, isBlocked) {
+  const dpr = window.devicePixelRatio || 1;
+  const point = worldToPlan({ x: label.x, y: label.y });
+  const title = "Interior";
+  const dimensions = `${formatFeetInches(label.width)} x ${formatFeetInches(label.depth)}`;
+
+  planCtx.save();
+  planCtx.font = `${11 * dpr}px Inter, sans-serif`;
+  const titleWidth = planCtx.measureText(title).width;
+  planCtx.font = `700 ${14 * dpr}px Inter, sans-serif`;
+  const dimensionsWidth = planCtx.measureText(dimensions).width;
+  const width = Math.max(titleWidth, dimensionsWidth) + 24 * dpr;
+  const height = 44 * dpr;
+  const x = point.x - width / 2;
+  const y = point.y - height / 2;
+
+  planCtx.fillStyle = isBlocked ? "rgba(199, 68, 97, 0.88)" : "rgba(255, 255, 255, 0.92)";
+  planCtx.strokeStyle = isBlocked ? "rgba(255, 255, 255, 0.82)" : "rgba(23, 27, 31, 0.28)";
+  planCtx.lineWidth = 1 * dpr;
+  roundRect(planCtx, x, y, width, height, 8 * dpr);
+  planCtx.fill();
+  planCtx.stroke();
+
+  planCtx.textAlign = "center";
+  planCtx.textBaseline = "middle";
+  planCtx.fillStyle = isBlocked ? "#ffffff" : "#68717a";
+  planCtx.font = `${10 * dpr}px Inter, sans-serif`;
+  planCtx.fillText(title, point.x, point.y - 9 * dpr);
+  planCtx.fillStyle = isBlocked ? "#ffffff" : "#172026";
+  planCtx.font = `800 ${13 * dpr}px Inter, sans-serif`;
+  planCtx.fillText(dimensions, point.x, point.y + 8 * dpr);
   planCtx.restore();
 }
 
@@ -1026,15 +1357,106 @@ function onPreviewWheel(event) {
   drawPreview();
 }
 
-function tickFpv(timestamp) {
+async function initFpvRenderer() {
+  try {
+    const [
+      threeModule,
+      vrButtonModule,
+      lineSegments2Module,
+      lineSegmentsGeometryModule,
+      lineMaterialModule,
+    ] = await Promise.all([
+      import(THREE_MODULE_URL),
+      import(VR_BUTTON_MODULE_URL),
+      import(LINE_SEGMENTS_2_MODULE_URL),
+      import(LINE_SEGMENTS_GEOMETRY_MODULE_URL),
+      import(LINE_MATERIAL_MODULE_URL),
+    ]);
+    THREE = threeModule;
+    VRButton = vrButtonModule.VRButton;
+    LineSegments2 = lineSegments2Module.LineSegments2;
+    LineSegmentsGeometry = lineSegmentsGeometryModule.LineSegmentsGeometry;
+    LineMaterial = lineMaterialModule.LineMaterial;
+  } catch (error) {
+    state.fpv.rendererReady = false;
+    els.fpvStatus.textContent = "WebXR unavailable";
+    els.fpvReadout.textContent = "Three.js failed to load from CDN";
+    return;
+  }
+
+  fpvScene = new THREE.Scene();
+  fpvScene.background = new THREE.Color(0xdfeef4);
+
+  fpvCamera = new THREE.PerspectiveCamera(70, 1, 0.01, 200);
+  fpvCamera.rotation.order = "YXZ";
+
+  fpvRig = new THREE.Group();
+  fpvRig.add(fpvCamera);
+  fpvScene.add(fpvRig);
+
+  fpvBoxesGroup = new THREE.Group();
+  fpvStageGroup = new THREE.Group();
+  fpvScene.add(fpvStageGroup);
+  fpvScene.add(fpvBoxesGroup);
+
+  const ambient = new THREE.HemisphereLight(0xffffff, 0x87939d, 1.7);
+  fpvScene.add(ambient);
+
+  const keyLight = new THREE.DirectionalLight(0xffffff, 1.8);
+  keyLight.position.set(-4, 8, 5);
+  fpvScene.add(keyLight);
+
+  fpvRenderer = new THREE.WebGLRenderer({
+    antialias: true,
+    canvas: els.fpvCanvas,
+  });
+  fpvRenderer.xr.enabled = true;
+  fpvRenderer.setPixelRatio(window.devicePixelRatio || 1);
+  fpvRenderer.setClearColor(0xdfeef4, 1);
+  fpvRenderer.setAnimationLoop(tickFpv);
+  fpvRenderer.xr.addEventListener("sessionstart", updateFpvStatus);
+  fpvRenderer.xr.addEventListener("sessionend", updateFpvStatus);
+
+  if (VRButton && els.fpvVrButton) {
+    fpvVrButton = VRButton.createButton(fpvRenderer);
+    els.fpvVrButton.replaceChildren(fpvVrButton);
+  }
+
+  state.fpv.rendererReady = true;
+  resizeFpvRenderer();
+  updateFpvStatus();
+}
+
+function resizeFpvRenderer() {
+  if (!fpvRenderer || !fpvCamera) return;
+  const rect = els.fpvCanvas.getBoundingClientRect();
+  const width = Math.max(1, Math.round(rect.width));
+  const height = Math.max(1, Math.round(rect.height));
+  fpvRenderer.setPixelRatio(window.devicePixelRatio || 1);
+  fpvRenderer.setSize(width, height, false);
+  fpvCamera.aspect = width / height;
+  fpvCamera.updateProjectionMatrix();
+  updateFpvEdgeResolution();
+}
+
+function tickFpv(timestamp, frame) {
+  if (!state.fpv.rendererReady) return;
   const previous = state.fpv.lastFrame || timestamp;
   const dt = Math.min(0.05, (timestamp - previous) / 1000);
   state.fpv.lastFrame = timestamp;
-  if (updateFpvPosition(dt)) drawFpv();
-  requestAnimationFrame(tickFpv);
+
+  syncFpvCamera();
+  if (fpvRenderer.xr.isPresenting) {
+    updateXrFpv(dt, frame);
+  } else {
+    updateDesktopFpv(dt);
+  }
+
+  syncFpvCamera();
+  renderFpvFrame();
 }
 
-function updateFpvPosition(dt) {
+function updateDesktopFpv(dt) {
   const keys = state.fpv.keys;
   let moveX = 0;
   let moveZ = 0;
@@ -1051,23 +1473,73 @@ function updateFpvPosition(dt) {
     moveZ -= forward.z;
   }
   if (keys.d) {
-    moveX += right.x;
-    moveZ += right.z;
-  }
-  if (keys.a) {
     moveX -= right.x;
     moveZ -= right.z;
+  }
+  if (keys.a) {
+    moveX += right.x;
+    moveZ += right.z;
   }
 
   const magnitude = Math.hypot(moveX, moveZ);
   if (!magnitude) return false;
 
   const step = state.fpv.speed * dt;
-  moveFpv((moveX / magnitude) * step, (moveZ / magnitude) * step);
+  tryMoveFpv((moveX / magnitude) * step, (moveZ / magnitude) * step);
   return true;
 }
 
-function moveFpv(dx, dz) {
+function updateXrFpv(dt) {
+  const axes = getXrMoveAxes();
+  if (!axes) return false;
+
+  const xrDirection = new THREE.Vector3();
+  fpvRenderer.xr.getCamera(fpvCamera).getWorldDirection(xrDirection);
+  xrDirection.y = 0;
+  if (xrDirection.lengthSq() < 0.0001) return false;
+  xrDirection.normalize();
+
+  const xrRight = new THREE.Vector3().crossVectors(xrDirection, new THREE.Vector3(0, 1, 0)).normalize();
+  const moveRenderX = xrRight.x * axes.x + xrDirection.x * -axes.y;
+  const moveRenderZ = xrRight.z * axes.x + xrDirection.z * -axes.y;
+  const magnitude = Math.hypot(moveRenderX, moveRenderZ);
+  if (!magnitude) return false;
+
+  const step = state.fpv.speed * dt;
+  tryMoveFpv((moveRenderX / magnitude) * step, (moveRenderZ / magnitude) * step);
+  return true;
+}
+
+function getXrMoveAxes() {
+  if (!fpvRenderer?.xr.isPresenting) return null;
+  const session = fpvRenderer.xr.getSession();
+  if (!session) return null;
+
+  for (const source of session.inputSources) {
+    const gamepad = source.gamepad;
+    if (!gamepad?.axes?.length) continue;
+    const axisPair = getGamepadAxisPair(gamepad.axes);
+    if (Math.hypot(axisPair.x, axisPair.y) > 0.15) return axisPair;
+  }
+
+  return null;
+}
+
+function getGamepadAxisPair(axes) {
+  const primary = {
+    x: axes[0] || 0,
+    y: axes[1] || 0,
+  };
+  const secondary = {
+    x: axes[2] || 0,
+    y: axes[3] || 0,
+  };
+  return Math.hypot(secondary.x, secondary.y) > Math.hypot(primary.x, primary.y)
+    ? secondary
+    : primary;
+}
+
+function tryMoveFpv(dx, dz) {
   const nextX = state.fpv.x + dx;
   if (canPlaceFpv(nextX, state.fpv.z)) state.fpv.x = nextX;
 
@@ -1185,225 +1657,131 @@ function onFpvMouseMove(event) {
 }
 
 function rotateFpv(dx, dy) {
-  state.fpv.yaw += dx * 0.12;
+  state.fpv.yaw -= dx * 0.12;
   state.fpv.pitch = clamp(state.fpv.pitch - dy * 0.1, -82, 82);
-  drawFpv();
+  syncFpvCamera();
+  renderFpvFrame();
 }
 
 function updateFpvStatus() {
   if (!els.fpvStatus) return;
   if (document.pointerLockElement !== els.fpvCanvas) state.fpv.dragging = false;
-  els.fpvStatus.textContent =
-    document.pointerLockElement === els.fpvCanvas ? "Mouse look active" : "Ground locked";
+  if (fpvRenderer?.xr.isPresenting) {
+    els.fpvStatus.textContent = "VR active";
+  } else {
+    els.fpvStatus.textContent =
+      document.pointerLockElement === els.fpvCanvas ? "Mouse look active" : "Ground locked";
+  }
 }
 
 function clearFpvKeys() {
   state.fpv.keys = {};
 }
 
-function drawFpv() {
-  const ctx = fpvCtx;
-  ctx.clearRect(0, 0, els.fpvCanvas.width, els.fpvCanvas.height);
-  drawFpvBackground(ctx);
+function rebuildFpvScene() {
+  if (!state.fpv.rendererReady) return;
+  clearThreeGroup(fpvBoxesGroup);
+  clearThreeGroup(fpvStageGroup);
 
-  const camera = makeFpvCamera();
-  drawFpvGround(ctx, camera);
-
-  const drawables = [];
-  generateBoxes()
-    .slice(0, 1800)
-    .forEach((box) => {
-      drawables.push(...boxFacesFpv(box, camera));
-    });
-  drawables.sort((a, b) => b.depth - a.depth);
-  drawables.forEach((face) => drawFace(ctx, face));
-
-  drawFpvHud(ctx);
-}
-
-function drawFpvBackground(ctx) {
-  const horizon = els.fpvCanvas.height * 0.52;
-  const sky = ctx.createLinearGradient(0, 0, 0, horizon);
-  sky.addColorStop(0, "#dfeef4");
-  sky.addColorStop(1, "#f7fbfd");
-  ctx.fillStyle = sky;
-  ctx.fillRect(0, 0, els.fpvCanvas.width, horizon);
-
-  const floor = ctx.createLinearGradient(0, horizon, 0, els.fpvCanvas.height);
-  floor.addColorStop(0, "#d8e0e4");
-  floor.addColorStop(1, "#bfcbd2");
-  ctx.fillStyle = floor;
-  ctx.fillRect(0, horizon, els.fpvCanvas.width, els.fpvCanvas.height - horizon);
-}
-
-function makeFpvCamera() {
-  return {
-    x: state.fpv.x,
-    y: state.fpv.eyeHeight,
-    z: state.fpv.z,
-    yaw: (state.fpv.yaw * Math.PI) / 180,
-    pitch: (state.fpv.pitch * Math.PI) / 180,
-    focal: Math.min(els.fpvCanvas.width, els.fpvCanvas.height) * 0.82,
-    near: 3,
-  };
-}
-
-function projectFpv(point, camera) {
-  const cameraPoint = worldToFpvCamera(point, camera);
-  if (cameraPoint.z <= camera.near) return null;
-  return projectFpvCamera(cameraPoint, camera);
-}
-
-function worldToFpvCamera(point, camera) {
-  const dx = point.x - camera.x;
-  const dy = point.y - camera.y;
-  const dz = point.z - camera.z;
-  const cosY = Math.cos(camera.yaw);
-  const sinY = Math.sin(camera.yaw);
-  const cosP = Math.cos(camera.pitch);
-  const sinP = Math.sin(camera.pitch);
-
-  const x1 = dx * cosY - dz * sinY;
-  const z1 = dx * sinY + dz * cosY;
-  const y1 = dy * cosP - z1 * sinP;
-  const z2 = dy * sinP + z1 * cosP;
-
-  return { x: x1, y: y1, z: z2 };
-}
-
-function projectFpvCamera(point, camera) {
-  return {
-    x: els.fpvCanvas.width / 2 + (point.x * camera.focal) / point.z,
-    y: els.fpvCanvas.height / 2 - (point.y * camera.focal) / point.z,
-    depth: point.z,
-  };
-}
-
-function clipPolygonToNearPlane(points, near) {
-  const clipped = [];
-
-  for (let i = 0; i < points.length; i += 1) {
-    const current = points[i];
-    const next = points[(i + 1) % points.length];
-    const currentInside = current.z >= near;
-    const nextInside = next.z >= near;
-
-    if (currentInside && nextInside) {
-      clipped.push(next);
-    } else if (currentInside && !nextInside) {
-      clipped.push(intersectNearPlane(current, next, near));
-    } else if (!currentInside && nextInside) {
-      clipped.push(intersectNearPlane(current, next, near));
-      clipped.push(next);
-    }
-  }
-
-  return clipped;
-}
-
-function intersectNearPlane(a, b, near) {
-  const t = (near - a.z) / (b.z - a.z);
-  return {
-    x: a.x + (b.x - a.x) * t,
-    y: a.y + (b.y - a.y) * t,
-    z: near,
-  };
-}
-
-function drawFpvGround(ctx, camera) {
   const stage = getStage();
-  const corners = [
-    { x: 0, y: 0, z: 0 },
-    { x: stage.width, y: 0, z: 0 },
-    { x: stage.width, y: 0, z: stage.depth },
-    { x: 0, y: 0, z: stage.depth },
-  ]
-    .map((point) => projectFpv(point, camera))
-    .filter(Boolean);
+  const floorGeometry = new THREE.PlaneGeometry(toMeters(stage.width), toMeters(stage.depth));
+  const floorMaterial = new THREE.MeshLambertMaterial({
+    color: 0xd8e0e4,
+    side: THREE.DoubleSide,
+  });
+  const floor = new THREE.Mesh(floorGeometry, floorMaterial);
+  floor.rotation.x = -Math.PI / 2;
+  floor.position.set(toMeters(stage.width / 2), 0, toMeters(stage.depth / 2));
+  fpvStageGroup.add(floor);
 
-  if (corners.length === 4) {
-    ctx.save();
-    ctx.fillStyle = "rgba(255,255,255,0.18)";
-    ctx.strokeStyle = "#7b8a93";
-    ctx.lineWidth = 1.4 * (window.devicePixelRatio || 1);
-    tracePath(ctx, corners);
-    ctx.fill();
-    ctx.stroke();
-    ctx.restore();
-  }
+  const grid = new THREE.GridHelper(
+    Math.max(toMeters(stage.width), toMeters(stage.depth)),
+    Math.max(2, Math.round(Math.max(stage.width, stage.depth) / 48)),
+    0x7b8a93,
+    0xb7c3cb,
+  );
+  grid.position.set(toMeters(stage.width / 2), 0.002, toMeters(stage.depth / 2));
+  fpvStageGroup.add(grid);
 
-  ctx.save();
-  ctx.strokeStyle = "rgba(70, 84, 94, 0.28)";
-  ctx.lineWidth = 1 * (window.devicePixelRatio || 1);
-  for (let x = 0; x <= stage.width; x += 48) {
-    drawFpvLine(ctx, { x, y: 0, z: 0 }, { x, y: 0, z: stage.depth }, camera);
-  }
-  for (let z = 0; z <= stage.depth; z += 48) {
-    drawFpvLine(ctx, { x: 0, y: 0, z }, { x: stage.width, y: 0, z }, camera);
-  }
-  ctx.restore();
+  generateBoxes().forEach((box) => {
+    const geometry = new THREE.BoxGeometry(toMeters(box.sx), toMeters(box.sy), toMeters(box.sz));
+    const material = new THREE.MeshLambertMaterial({ color: new THREE.Color(box.color) });
+    const mesh = new THREE.Mesh(geometry, material);
+    const position = new THREE.Vector3(toMeters(box.cx), toMeters(box.cy), toMeters(box.cz));
+    mesh.position.copy(position);
+    fpvBoxesGroup.add(mesh);
+    fpvBoxesGroup.add(createBoxEdgeOutline(geometry, position));
+  });
+  updateFpvEdgeResolution();
 }
 
-function drawFpvLine(ctx, a, b, camera) {
-  const pa = projectFpv(a, camera);
-  const pb = projectFpv(b, camera);
-  if (!pa || !pb) return;
-  ctx.beginPath();
-  ctx.moveTo(pa.x, pa.y);
-  ctx.lineTo(pb.x, pb.y);
-  ctx.stroke();
+function clearThreeGroup(group) {
+  while (group.children.length) {
+    const child = group.children.pop();
+    disposeThreeObject(child);
+  }
 }
 
-function boxFacesFpv(box, camera) {
-  const x1 = box.cx - box.sx / 2;
-  const x2 = box.cx + box.sx / 2;
-  const y1 = box.cy - box.sy / 2;
-  const y2 = box.cy + box.sy / 2;
-  const z1 = box.cz - box.sz / 2;
-  const z2 = box.cz + box.sz / 2;
-  const vertices = {
-    a: { x: x1, y: y1, z: z1 },
-    b: { x: x2, y: y1, z: z1 },
-    c: { x: x2, y: y2, z: z1 },
-    d: { x: x1, y: y2, z: z1 },
-    e: { x: x1, y: y1, z: z2 },
-    f: { x: x2, y: y1, z: z2 },
-    g: { x: x2, y: y2, z: z2 },
-    h: { x: x1, y: y2, z: z2 },
-  };
-  const faces = [
-    ["a", "b", "c", "d", 0.72],
-    ["e", "f", "g", "h", 0.92],
-    ["d", "c", "g", "h", 1.12],
-    ["a", "b", "f", "e", 0.62],
-    ["b", "c", "g", "f", 0.82],
-    ["a", "d", "h", "e", 0.68],
-  ];
+function createBoxEdgeOutline(boxGeometry, position) {
+  const edgesGeometry = new THREE.EdgesGeometry(boxGeometry);
+  const lineGeometry = new LineSegmentsGeometry();
+  lineGeometry.setPositions(Array.from(edgesGeometry.attributes.position.array));
+  edgesGeometry.dispose();
 
-  return faces.flatMap((face) => {
-    const cameraPoints = face.slice(0, 4).map((key) => worldToFpvCamera(vertices[key], camera));
-    const clipped = clipPolygonToNearPlane(cameraPoints, camera.near);
-    if (clipped.length < 3) return [];
-    const points = clipped.map((point) => projectFpvCamera(point, camera));
-    return {
-      points,
-      depth: clipped.reduce((sum, point) => sum + point.z, 0) / clipped.length,
-      color: shadeColor(box.color, face[4]),
-    };
+  const material = new LineMaterial({
+    color: BOX_EDGE_COLOR,
+    linewidth: BOX_EDGE_WIDTH_PX,
+  });
+  const outline = new LineSegments2(lineGeometry, material);
+  outline.position.copy(position);
+  outline.computeLineDistances();
+  outline.frustumCulled = false;
+  outline.renderOrder = 1;
+  return outline;
+}
+
+function updateFpvEdgeResolution() {
+  if (!fpvRenderer || !fpvBoxesGroup || !THREE) return;
+  const size = fpvRenderer.getDrawingBufferSize(new THREE.Vector2());
+  fpvBoxesGroup.traverse((object) => {
+    const material = object.material;
+    if (material?.isLineMaterial) material.resolution.set(size.x, size.y);
   });
 }
 
-function drawFpvHud(ctx) {
-  const dpr = window.devicePixelRatio || 1;
-  const text = `X ${Math.round(state.fpv.x)} in  Z ${Math.round(state.fpv.z)} in  Yaw ${formatDegrees(state.fpv.yaw)}  Pitch ${formatDegrees(state.fpv.pitch)}`;
-  ctx.save();
-  ctx.fillStyle = "rgba(23, 27, 31, 0.72)";
-  ctx.fillRect(14 * dpr, 14 * dpr, 340 * dpr, 30 * dpr);
-  ctx.fillStyle = "#ffffff";
-  ctx.font = `${12 * dpr}px Inter, sans-serif`;
-  ctx.textBaseline = "middle";
-  ctx.fillText(text, 24 * dpr, 30 * dpr);
-  ctx.restore();
+function disposeThreeObject(object) {
+  object.children.forEach(disposeThreeObject);
+  object.geometry?.dispose?.();
+  const materials = Array.isArray(object.material) ? object.material : [object.material];
+  materials.forEach((material) => material?.dispose?.());
+}
+
+function syncFpvCamera() {
+  if (!state.fpv.rendererReady) return;
+  fpvRig.position.set(toMeters(state.fpv.x), 0, toMeters(state.fpv.z));
+  fpvRig.rotation.set(0, Math.PI + (state.fpv.yaw * Math.PI) / 180, 0);
+  fpvCamera.position.set(0, toMeters(state.fpv.eyeHeight), 0);
+  if (fpvRenderer.xr.isPresenting) {
+    fpvCamera.rotation.set(0, 0, 0);
+  } else {
+    fpvCamera.rotation.set((state.fpv.pitch * Math.PI) / 180, 0, 0);
+  }
+  updateFpvReadout();
+}
+
+function renderFpvFrame() {
+  if (!state.fpv.rendererReady) return;
+  syncFpvCamera();
+  fpvRenderer.render(fpvScene, fpvCamera);
+}
+
+function updateFpvReadout() {
+  if (!els.fpvReadout) return;
+  els.fpvReadout.textContent = `X ${Math.round(state.fpv.x)} in, Z ${Math.round(state.fpv.z)} in, yaw ${formatDegrees(state.fpv.yaw)}, pitch ${formatDegrees(state.fpv.pitch)}`;
+}
+
+function toMeters(inches) {
+  return inches * INCH_TO_METER;
 }
 
 function renderSummary() {
@@ -1502,4 +1880,7 @@ function formatFeetInches(inches) {
   return `${feet} ft ${inch} in`;
 }
 
-init();
+init().catch((error) => {
+  console.error(error);
+  if (els.fpvStatus) els.fpvStatus.textContent = "Startup error";
+});
