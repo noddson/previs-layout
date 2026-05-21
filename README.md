@@ -2,6 +2,8 @@
 
 A browser-based planner for building movie pre-visualization layouts from cardboard boxes.
 
+Live app: https://noddson.github.io/previs-layout/
+
 ## What It Does
 
 - Draw wall runs or full rooms from a top-down snapped grid.
