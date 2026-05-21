@@ -34,8 +34,10 @@ python3 -m http.server 4173
 
 Then visit `http://localhost:4173`.
 
-The FPV/WebXR view loads Three.js from a CDN. Immersive VR requires a secure
-context, so GitHub Pages over HTTPS is the intended headset target.
+The FPV/WebXR view uses the vendored Three.js 0.164.1 files under `vendor/three`,
+so the public app does not execute runtime JavaScript from a third-party CDN.
+Immersive VR requires a secure context, so GitHub Pages over HTTPS is the
+intended headset target.
 
 ## Configuration
 

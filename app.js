@@ -39,18 +39,22 @@ const DEFAULT_CONFIG = {
   },
 };
 
-const THREE_MODULE_URL = "https://cdn.jsdelivr.net/npm/three@0.164.1/build/three.module.js";
-const VR_BUTTON_MODULE_URL =
-  "https://cdn.jsdelivr.net/npm/three@0.164.1/examples/jsm/webxr/VRButton.js";
-const LINE_SEGMENTS_2_MODULE_URL =
-  "https://cdn.jsdelivr.net/npm/three@0.164.1/examples/jsm/lines/LineSegments2.js";
+const THREE_MODULE_URL = "./vendor/three/build/three.module.js";
+const VR_BUTTON_MODULE_URL = "./vendor/three/examples/jsm/webxr/VRButton.js";
+const LINE_SEGMENTS_2_MODULE_URL = "./vendor/three/examples/jsm/lines/LineSegments2.js";
 const LINE_SEGMENTS_GEOMETRY_MODULE_URL =
-  "https://cdn.jsdelivr.net/npm/three@0.164.1/examples/jsm/lines/LineSegmentsGeometry.js";
-const LINE_MATERIAL_MODULE_URL =
-  "https://cdn.jsdelivr.net/npm/three@0.164.1/examples/jsm/lines/LineMaterial.js";
+  "./vendor/three/examples/jsm/lines/LineSegmentsGeometry.js";
+const LINE_MATERIAL_MODULE_URL = "./vendor/three/examples/jsm/lines/LineMaterial.js";
 const INCH_TO_METER = 0.0254;
 const BOX_EDGE_COLOR = 0x000000;
 const BOX_EDGE_WIDTH_PX = 5;
+const MAX_IMPORTED_FILE_BYTES = 1_000_000;
+const MAX_BOX_TYPES = 50;
+const MAX_WALLS = 2000;
+const MAX_REMOVED_BLOCKS = 2000;
+const MAX_STRING_LENGTH = 80;
+const MAX_BOX_DIMENSION = 2400;
+const MAX_STAGE_SIZE = 2400;
 
 let THREE = null;
 let VRButton = null;
@@ -163,21 +167,32 @@ async function fetchJson(path) {
   }
 }
 
-function normalizeBoxes(source) {
+function normalizeBoxes(source, { strict = false } = {}) {
   const candidates = Array.isArray(source) ? source : source?.boxes;
   const boxes = [];
   const ids = new Set();
 
-  (Array.isArray(candidates) ? candidates : DEFAULT_BOX_TYPES).forEach((box, index) => {
-    const id = String(box?.id || `box-${index + 1}`).trim();
+  if (strict && !Array.isArray(candidates)) {
+    throw new Error("Plan import failed: missing boxTypes array.");
+  }
+  if (strict && candidates.length > MAX_BOX_TYPES) {
+    throw new Error(`Plan import failed: more than ${MAX_BOX_TYPES} box types.`);
+  }
+
+  (Array.isArray(candidates) ? candidates.slice(0, MAX_BOX_TYPES) : DEFAULT_BOX_TYPES).forEach((box, index) => {
+    const id = normalizeIdentifier(box?.id, `box-${index + 1}`, strict);
+    const name = normalizePlainText(box?.name, id, strict);
     const length = Number(box?.length);
     const depth = Number(box?.depth);
     const height = Number(box?.height);
-    if (!id || ids.has(id) || length <= 0 || depth <= 0 || height <= 0) return;
+    if (!id || ids.has(id) || !validDimension(length) || !validDimension(depth) || !validDimension(height)) {
+      if (strict) throw new Error(`Plan import failed: invalid box type "${id || index + 1}".`);
+      return;
+    }
     ids.add(id);
     boxes.push({
       id,
-      name: String(box?.name || id).trim(),
+      name,
       length,
       depth,
       height,
@@ -187,6 +202,24 @@ function normalizeBoxes(source) {
   });
 
   return boxes.length ? boxes : DEFAULT_BOX_TYPES.map((box) => ({ ...box }));
+}
+
+function normalizeIdentifier(value, fallback, strict = false) {
+  const raw = normalizePlainText(value, fallback, strict);
+  const id = raw.replace(/[^a-z0-9_-]/gi, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
+  if (id) return id.slice(0, MAX_STRING_LENGTH);
+  if (strict) throw new Error("Plan import failed: invalid box id.");
+  return fallback;
+}
+
+function normalizePlainText(value, fallback, strict = false) {
+  const text = String(value ?? fallback ?? "").replace(/[\u0000-\u001f\u007f]/g, "").trim();
+  if (!text && strict) throw new Error("Plan import failed: missing required text value.");
+  return (text || fallback || "").slice(0, MAX_STRING_LENGTH);
+}
+
+function validDimension(value) {
+  return Number.isFinite(value) && value > 0 && value <= MAX_BOX_DIMENSION;
 }
 
 function normalizeColor(value, fallback) {
@@ -200,8 +233,8 @@ function normalizeConfig(source) {
     defaultWallHeight: clamp(Number(source?.defaultWallHeight ?? source?.wallHeight) || DEFAULT_CONFIG.defaultWallHeight, 12, 360),
     defaultGridSnap: clamp(Number(source?.defaultGridSnap ?? source?.gridSnap) || DEFAULT_CONFIG.defaultGridSnap, 3, 96),
     defaultStageSize: {
-      width: clamp(Number(stage.width) || DEFAULT_CONFIG.defaultStageSize.width, 96, 2400),
-      depth: clamp(Number(stage.depth) || DEFAULT_CONFIG.defaultStageSize.depth, 96, 2400),
+      width: clamp(Number(stage.width) || DEFAULT_CONFIG.defaultStageSize.width, 96, MAX_STAGE_SIZE),
+      depth: clamp(Number(stage.depth) || DEFAULT_CONFIG.defaultStageSize.depth, 96, MAX_STAGE_SIZE),
     },
   };
 }
@@ -312,8 +345,8 @@ function getBox(id) {
 
 function getStage() {
   return {
-    width: clamp(Number(els.stageWidth.value) || 480, 96, 2400),
-    depth: clamp(Number(els.stageDepth.value) || 360, 96, 2400),
+    width: clamp(Number(els.stageWidth.value) || 480, 96, MAX_STAGE_SIZE),
+    depth: clamp(Number(els.stageDepth.value) || 360, 96, MAX_STAGE_SIZE),
   };
 }
 
@@ -351,12 +384,18 @@ function undo() {
 }
 
 function addDemoLayout() {
-  const primaryBox = BOX_TYPES[0].id;
+  const primaryBox =
+    BOX_TYPES.find((box) => box.length === 24 && box.depth === 24 && box.height === 24)?.id ||
+    BOX_TYPES[0].id;
   const secondaryBox = BOX_TYPES[1]?.id || primaryBox;
+  const topWall = makeWall(96, 72, 384, 72, 120, primaryBox);
+  const bottomWall = makeWall(96, 240, 384, 240, 120, primaryBox);
+  topWall.removedBlocks = [2];
+  bottomWall.removedBlocks = [6];
   state.walls = [
-    makeWall(96, 72, 384, 72, 120, primaryBox),
+    topWall,
     makeWall(360, 96, 360, 240, 120, primaryBox),
-    makeWall(96, 240, 384, 240, 120, primaryBox),
+    bottomWall,
     makeWall(96, 96, 96, 240, 120, primaryBox),
     makeWall(216, 264, 216, 336, 72, secondaryBox),
     makeWall(276, 264, 276, 336, 72, secondaryBox),
@@ -415,6 +454,9 @@ async function importSelectedPlan(event) {
   if (!file) return;
 
   try {
+    if (file.size > MAX_IMPORTED_FILE_BYTES) {
+      throw new Error("Plan import failed: JSON file is too large.");
+    }
     const plan = parsePlanJson(JSON.parse(await file.text()));
     pushHistory();
     applyImportedPlan(plan);
@@ -427,7 +469,7 @@ async function importSelectedPlan(event) {
 
 function parsePlanJson(source) {
   const plan = upgradePlan(source);
-  const importedBoxes = normalizeBoxes(plan.boxTypes || plan.boxes);
+  const importedBoxes = normalizeBoxes(plan.boxTypes || plan.boxes, { strict: true });
   const boxIds = new Set(importedBoxes.map((box) => box.id));
   const walls = normalizeImportedWalls(plan.walls, boxIds);
 
@@ -449,6 +491,9 @@ function upgradePlan(source) {
   if (!Array.isArray(source.walls)) {
     throw new Error("Plan import failed: missing walls array.");
   }
+  if (source.walls.length > MAX_WALLS) {
+    throw new Error(`Plan import failed: more than ${MAX_WALLS} wall runs.`);
+  }
   return source;
 }
 
@@ -457,12 +502,12 @@ function normalizeImportedWalls(walls, boxIds) {
     const boxId = String(wall?.boxId || "");
     if (!boxIds.has(boxId)) throw new Error(`Plan import failed: unknown box type "${boxId}".`);
     return {
-      id: String(wall.id || `${Date.now()}-${Math.random().toString(16).slice(2)}`),
-      x1: finiteNumber(wall.x1, "x1"),
-      y1: finiteNumber(wall.y1, "y1"),
-      x2: finiteNumber(wall.x2, "x2"),
-      y2: finiteNumber(wall.y2, "y2"),
-      height: clamp(finiteNumber(wall.height, "height"), 12, 360),
+      id: normalizePlainText(wall.id, `${Date.now()}-${Math.random().toString(16).slice(2)}`),
+      x1: finiteNumberInRange(wall.x1, "x1", 0, MAX_STAGE_SIZE),
+      y1: finiteNumberInRange(wall.y1, "y1", 0, MAX_STAGE_SIZE),
+      x2: finiteNumberInRange(wall.x2, "x2", 0, MAX_STAGE_SIZE),
+      y2: finiteNumberInRange(wall.y2, "y2", 0, MAX_STAGE_SIZE),
+      height: finiteNumberInRange(wall.height, "height", 12, 360),
       boxId,
       removedBlocks: normalizeRemovedBlocks(wall.removedBlocks),
       roomLabel: normalizeRoomLabel(wall.roomLabel),
@@ -476,9 +521,16 @@ function finiteNumber(value, label) {
   return number;
 }
 
+function finiteNumberInRange(value, label, min, max) {
+  const number = finiteNumber(value, label);
+  if (number < min || number > max) throw new Error(`Plan import failed: ${label} is out of range.`);
+  return number;
+}
+
 function normalizeRemovedBlocks(blocks) {
   if (!Array.isArray(blocks)) return [];
   const indexes = blocks
+    .slice(0, MAX_REMOVED_BLOCKS)
     .map((block) => {
       if (Number.isInteger(block)) return block;
       if (Number.isInteger(Number(block))) return Number(block);
@@ -497,7 +549,9 @@ function normalizeRoomLabel(label) {
     width: Number(label.width),
     depth: Number(label.depth),
   };
-  return Object.values(normalized).every(Number.isFinite) ? normalized : undefined;
+  return Object.values(normalized).every((value) => Number.isFinite(value) && value >= 0 && value <= MAX_STAGE_SIZE)
+    ? normalized
+    : undefined;
 }
 
 function applyImportedPlan(plan) {
@@ -1824,28 +1878,39 @@ function summarizeLayout() {
 }
 
 function renderBreakdown(byType) {
-  els.boxBreakdown.innerHTML = "";
+  els.boxBreakdown.replaceChildren();
   if (!byType.size) {
-    els.boxBreakdown.innerHTML = `<div class="empty-state">No boxes yet.</div>`;
+    els.boxBreakdown.append(createEmptyState("No boxes yet."));
     return;
   }
 
   byType.forEach((item) => {
     const row = document.createElement("div");
+    const swatch = document.createElement("span");
+    const title = document.createElement("span");
+    const meta = document.createElement("span");
+    const value = document.createElement("span");
+
     row.className = "breakdown-row";
-    row.innerHTML = `
-      <span class="swatch" style="background:${item.box.color}"></span>
-      <span class="row-title">${item.box.name}<span class="row-meta">${formatFeetInches(item.length)} linear run, ${formatMoney(item.cost)}</span></span>
-      <span class="row-value">${item.count}</span>
-    `;
+    swatch.className = "swatch";
+    swatch.style.backgroundColor = item.box.color;
+    title.className = "row-title";
+    title.textContent = item.box.name;
+    meta.className = "row-meta";
+    meta.textContent = `${formatFeetInches(item.length)} linear run, ${formatMoney(item.cost)}`;
+    value.className = "row-value";
+    value.textContent = item.count.toLocaleString();
+
+    title.append(meta);
+    row.append(swatch, title, value);
     els.boxBreakdown.append(row);
   });
 }
 
 function renderWallList() {
-  els.wallList.innerHTML = "";
+  els.wallList.replaceChildren();
   if (!state.walls.length) {
-    els.wallList.innerHTML = `<div class="empty-state">No wall runs.</div>`;
+    els.wallList.append(createEmptyState("No wall runs."));
     return;
   }
 
@@ -1853,14 +1918,32 @@ function renderWallList() {
     const metrics = getWallMetrics(wall);
     const box = getBox(wall.boxId);
     const row = document.createElement("div");
+    const swatch = document.createElement("span");
+    const title = document.createElement("span");
+    const meta = document.createElement("span");
+    const value = document.createElement("span");
+
     row.className = "wall-row";
-    row.innerHTML = `
-      <span class="swatch" style="background:${box.color}"></span>
-      <span class="row-title">Run ${index + 1}<span class="row-meta">${formatFeetInches(metrics.length)} long, ${formatFeetInches(wall.height)} high, ${formatMoney(metrics.cost)}</span></span>
-      <span class="row-value">${metrics.count}</span>
-    `;
+    swatch.className = "swatch";
+    swatch.style.backgroundColor = box.color;
+    title.className = "row-title";
+    title.textContent = `Run ${index + 1}`;
+    meta.className = "row-meta";
+    meta.textContent = `${formatFeetInches(metrics.length)} long, ${formatFeetInches(wall.height)} high, ${formatMoney(metrics.cost)}`;
+    value.className = "row-value";
+    value.textContent = metrics.count.toLocaleString();
+
+    title.append(meta);
+    row.append(swatch, title, value);
     els.wallList.append(row);
   });
+}
+
+function createEmptyState(message) {
+  const empty = document.createElement("div");
+  empty.className = "empty-state";
+  empty.textContent = message;
+  return empty;
 }
 
 function formatMoney(value) {
