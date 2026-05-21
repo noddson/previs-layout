@@ -39,6 +39,21 @@ so the public app does not execute runtime JavaScript from a third-party CDN.
 Immersive VR requires a secure context, so GitHub Pages over HTTPS is the
 intended headset target.
 
+
+## Security Headers
+
+Configure your host/CDN/reverse proxy to send security headers on HTML responses (including `index.html`).
+This repo includes a Netlify/Cloudflare Pages-style [`_headers`](./_headers) file with:
+
+- `Content-Security-Policy` (header form) including:
+  - `default-src 'self'`
+  - `object-src 'none'`
+  - `base-uri 'none'`
+  - `frame-ancestors 'none'`
+- `X-Frame-Options: DENY`
+
+After deploy, verify in browser DevTools **Network** tab that `index.html` response headers include these values (and are not only present as a meta tag).
+
 ## Configuration
 
 Box types are loaded from `boxes.json`. Each box needs an `id`, `name`, `length`,
