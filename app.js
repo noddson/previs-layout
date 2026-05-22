@@ -42,6 +42,7 @@ const DEFAULT_CONFIG = {
 
 const THREE_MODULE_URL = "./vendor/three/build/three.module.js";
 const VR_BUTTON_MODULE_URL = "./vendor/three/examples/jsm/webxr/VRButton.js";
+const DEMO_PLAN_PATH = "demo.json";
 const INCH_TO_METER = 0.0254;
 const BOX_EDGE_COLOR = 0x000000;
 const MAX_IMPORTED_FILE_BYTES = 1_000_000;
@@ -69,6 +70,7 @@ let fpvStageGroup = null;
 let fpvVrButton = null;
 let BOX_TYPES = DEFAULT_BOX_TYPES.map((box) => ({ ...box }));
 let appConfig = { ...DEFAULT_CONFIG, defaultStageSize: { ...DEFAULT_CONFIG.defaultStageSize } };
+let demoPlan = { config: null, selectedBoxId: null, walls: [] };
 
 const state = {
   tool: "wall",
@@ -152,10 +154,11 @@ const PLAN_DRAG_MODE = {
 
 async function init() {
   await loadAppConfiguration();
+  demoPlan = await loadDemoPlan();
   populateBoxOptions();
   applyDefaultConfig();
   bindEvents();
-  addDemoLayout();
+  applyDemoLayout();
   await initFpvRenderer();
   resetFpvToSpawn();
   renderAll();
@@ -171,13 +174,13 @@ async function loadAppConfiguration() {
   state.costs = Object.fromEntries(BOX_TYPES.map((box) => [box.id, box.cost]));
 }
 
-async function fetchJson(path) {
+async function fetchJson(path, { fallbackMessage } = {}) {
   try {
     const response = await fetch(path, { cache: "no-store" });
     if (!response.ok) throw new Error(`${path} returned ${response.status}`);
     return await response.json();
   } catch (error) {
-    console.warn(`Using built-in defaults because ${path} could not be loaded.`, error);
+    console.warn(fallbackMessage || `Using built-in defaults because ${path} could not be loaded.`, error);
     return null;
   }
 }
@@ -321,7 +324,7 @@ function bindEvents() {
     pushHistory();
     state.blockedReason = null;
     clearHoveredInterior();
-    addDemoLayout();
+    applyDemoLayout();
     resetFpvToSpawn();
     renderAll();
   });
@@ -420,23 +423,40 @@ function undo() {
   renderAll();
 }
 
-function addDemoLayout() {
-  const primaryBox =
-    BOX_TYPES.find((box) => box.length === 24 && box.depth === 24 && box.height === 24)?.id ||
-    BOX_TYPES[0].id;
-  const secondaryBox = BOX_TYPES[1]?.id || primaryBox;
-  const topWall = makeWall(96, 72, 384, 72, 120, primaryBox);
-  const bottomWall = makeWall(96, 240, 384, 240, 120, primaryBox);
-  topWall.removedBlocks = [2];
-  bottomWall.removedBlocks = [6];
-  state.walls = [
-    topWall,
-    makeWall(360, 96, 360, 240, 120, primaryBox),
-    bottomWall,
-    makeWall(96, 96, 96, 240, 120, primaryBox),
-    makeWall(216, 264, 216, 336, 72, secondaryBox),
-    makeWall(276, 264, 276, 336, 72, secondaryBox),
-  ];
+async function loadDemoPlan() {
+  const source = await fetchJson(DEMO_PLAN_PATH, {
+    fallbackMessage: `${DEMO_PLAN_PATH} could not be loaded; starting without a demo layout.`,
+  });
+  if (!source) return { config: null, selectedBoxId: null, walls: [] };
+
+  try {
+    return parseDemoPlanJson(source);
+  } catch (error) {
+    console.warn(`${DEMO_PLAN_PATH} could not be loaded as a demo layout.`, error);
+    return { config: null, selectedBoxId: null, walls: [] };
+  }
+}
+
+function parseDemoPlanJson(source) {
+  const plan = upgradePlan(source);
+  const boxIds = new Set(BOX_TYPES.map((box) => box.id));
+  return {
+    config: plan.config ? normalizeConfig(plan.config) : null,
+    selectedBoxId: plan.selectedBoxId ? String(plan.selectedBoxId) : null,
+    walls: normalizeImportedWalls(plan.walls, boxIds),
+  };
+}
+
+function applyDemoLayout() {
+  if (demoPlan.config) {
+    appConfig = demoPlan.config;
+    applyDefaultConfig();
+  }
+  if (demoPlan.selectedBoxId && BOX_TYPES.some((box) => box.id === demoPlan.selectedBoxId)) {
+    els.boxType.value = demoPlan.selectedBoxId;
+    els.boxCost.value = getBoxCost(els.boxType.value);
+  }
+  state.walls = demoPlan.walls.map(cloneWall);
 }
 
 function savePlan() {
@@ -1176,8 +1196,7 @@ function footprintToPlanRect(footprint) {
 function generateFootprints(wall) {
   const box = getBox(wall.boxId);
   const horizontal = Math.abs(wall.x2 - wall.x1) >= Math.abs(wall.y2 - wall.y1);
-  const length = horizontal ? Math.abs(wall.x2 - wall.x1) : Math.abs(wall.y2 - wall.y1);
-  const count = Math.max(1, Math.ceil(length / box.length));
+  const count = getWallColumnCapacity(wall, box);
   const direction = horizontal ? Math.sign(wall.x2 - wall.x1) || 1 : Math.sign(wall.y2 - wall.y1) || 1;
   const removed = new Set(wall.removedBlocks || []);
   const footprints = [];
@@ -1205,6 +1224,15 @@ function generateFootprints(wall) {
     }
   }
   return footprints;
+}
+
+function getWallRunLength(wall) {
+  const horizontal = Math.abs(wall.x2 - wall.x1) >= Math.abs(wall.y2 - wall.y1);
+  return horizontal ? Math.abs(wall.x2 - wall.x1) : Math.abs(wall.y2 - wall.y1);
+}
+
+function getWallColumnCapacity(wall, box = getBox(wall.boxId)) {
+  return Math.max(1, Math.ceil(getWallRunLength(wall) / box.length));
 }
 
 function pointInFootprint(point, footprint) {
@@ -1431,11 +1459,13 @@ function rectsIntersect(a, b) {
 function getWallMetrics(wall) {
   const box = getBox(wall.boxId);
   const columns = generateFootprints(wall).length;
-  const length = columns * box.length;
+  const length = getWallRunLength(wall);
+  const fullColumns = getWallColumnCapacity(wall, box);
   const layers = Math.max(1, Math.ceil(wall.height / box.height));
   return {
     length,
     columns,
+    fullColumns,
     layers,
     count: columns * layers,
     cost: columns * layers * getBoxCost(wall.boxId),

@@ -1,0 +1,76 @@
+{
+  "version": 1,
+  "app": "previs-layout",
+  "selectedBoxId": "cube24",
+  "config": {
+    "defaultWallHeight": 72,
+    "defaultGridSnap": 12,
+    "defaultBuilderCount": 4,
+    "defaultStageSize": {
+      "width": 480,
+      "depth": 360
+    }
+  },
+  "walls": [
+    {
+      "id": "demo-top-wall",
+      "x1": 96,
+      "y1": 72,
+      "x2": 384,
+      "y2": 72,
+      "height": 120,
+      "boxId": "cube24",
+      "removedBlocks": [2]
+    },
+    {
+      "id": "demo-right-wall",
+      "x1": 360,
+      "y1": 96,
+      "x2": 360,
+      "y2": 240,
+      "height": 120,
+      "boxId": "cube24",
+      "removedBlocks": []
+    },
+    {
+      "id": "demo-bottom-wall",
+      "x1": 96,
+      "y1": 240,
+      "x2": 384,
+      "y2": 240,
+      "height": 120,
+      "boxId": "cube24",
+      "removedBlocks": [6]
+    },
+    {
+      "id": "demo-left-wall",
+      "x1": 96,
+      "y1": 96,
+      "x2": 96,
+      "y2": 240,
+      "height": 120,
+      "boxId": "cube24",
+      "removedBlocks": []
+    },
+    {
+      "id": "demo-south-left-partition",
+      "x1": 216,
+      "y1": 264,
+      "x2": 216,
+      "y2": 336,
+      "height": 72,
+      "boxId": "tall18",
+      "removedBlocks": []
+    },
+    {
+      "id": "demo-south-right-partition",
+      "x1": 276,
+      "y1": 264,
+      "x2": 276,
+      "y2": 336,
+      "height": 72,
+      "boxId": "tall18",
+      "removedBlocks": []
+    }
+  ]
+}

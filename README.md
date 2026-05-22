@@ -15,6 +15,7 @@ Live app: https://noddson.github.io/previs-layout/
   - 18 x 18 x 24 high, $3.74 each
 - Set wall height, stage size, snap spacing, and cost per box.
 - Set startup defaults in `config.json`, including snap, wall height, and stage size.
+- Load the startup/demo room layout from `demo.json`.
 - Save the active plan to versioned JSON and import a previously saved plan.
 - Starts with 12-inch snap, 72-inch wall height, yaw 210, and pitch 340 by default.
 - See total box count, cost, type breakdown, and wall-run breakdown.
@@ -76,6 +77,10 @@ Startup defaults are loaded from `config.json`:
 Saved plan files include `version`, `boxTypes`, `config`, and `walls`, so an
 imported plan can restore the box definitions and costs it was created with.
 
+The demo layout shown on startup and restored by the Demo button is loaded from
+`demo.json`. It uses the same `version`, `config`, selected box, and `walls`
+shape as saved plan files, with `boxId` values matching entries in `boxes.json`.
+
 ## Notes
 
 Counts are calculated per wall run:
@@ -84,10 +89,8 @@ Counts are calculated per wall run:
 ceil(wall length / box length) * ceil(wall height / box height)
 ```
 
-Displayed run length is calculated from placed boxes, so a 24-inch box reports as
-2 feet, two boxes as 4 feet, three boxes as 6 feet, and so on.
-
-This keeps the estimate readable and conservative for standalone wall runs.
+Displayed run length is calculated from the wall run endpoints, so doorway gaps
+or erased box stacks do not shorten the reported wall length.
 Placements that would intersect existing boxes are blocked.
 Wall runs use the first clicked grid point as the first box footprint edge instead
 of a wall centerline, so boxes stay aligned to the grid from the placement point.
