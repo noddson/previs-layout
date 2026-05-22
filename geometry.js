@@ -434,11 +434,14 @@ function rectsIntersect(a, b) {
 function getWallMetrics(wall) {
   const box = getBox(wall.boxId);
   const columns = generateFootprints(wall).length;
-  const length = getWallRunLength(wall);
   const fullColumns = getWallColumnCapacity(wall, box);
+  const rawLength = getWallRunLength(wall);
+  const fullLength = fullColumns * box.length;
   const layers = Math.max(1, Math.ceil(wall.height / box.height));
   return {
-    length,
+    length: fullLength,
+    rawLength,
+    fullLength,
     columns,
     fullColumns,
     layers,
