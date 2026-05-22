@@ -89,8 +89,9 @@ Counts are calculated per wall run:
 ceil(wall length / box length) * ceil(wall height / box height)
 ```
 
-Displayed run length is calculated from the wall run endpoints, so doorway gaps
-or erased box stacks do not shorten the reported wall length.
+Displayed run length is calculated from the wall run endpoints. Interior doorway
+gaps do not shorten the reported wall length, but erased stacks at either end of
+a wall run trim the run and update its reported length.
 Placements that would intersect existing boxes are blocked.
 Wall runs use the first clicked grid point as the first box footprint edge instead
 of a wall centerline, so boxes stay aligned to the grid from the placement point.
