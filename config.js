@@ -10,24 +10,6 @@ const DEFAULT_BOX_TYPES = [
     cost: 5.89,
     color: "#0f8f8a",
   },
-  {
-    id: "cube18",
-    name: "18 x 18 x 18 cube",
-    length: 18,
-    depth: 18,
-    height: 18,
-    cost: 3.11,
-    color: "#d88a12",
-  },
-  {
-    id: "tall18",
-    name: "18 x 18 x 24 high",
-    length: 18,
-    depth: 18,
-    height: 24,
-    cost: 3.74,
-    color: "#326fc0",
-  },
 ];
 
 const DEFAULT_CONFIG = {

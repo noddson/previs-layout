@@ -11,15 +11,14 @@ Live app: https://noddson.github.io/previs-layout/
 - Hover over rectangular wall-bounded spaces to see clear dimensions and area, allowing doorway gaps up to 40% of each side.
 - Pick configurable box sizes from `boxes.json`:
   - 24 x 24 x 24 cube, $5.89 each
-  - 18 x 18 x 18 cube, $3.11 each
   - 18 x 18 x 24 high, $3.74 each
+  - 18 x 18 x 18 cube, $3.11 each
+  - 12 x 12 x 12 cube, $1.29 each
 - Set wall height, stage size, snap spacing, and cost per box.
-- Set startup defaults in `config.json`, including snap, wall height, and stage size.
+- Set startup defaults in `config.json`, including snap, wall height, builder count, and stage size.
 - Load the startup/demo room layout from `demo.json`.
 - Save the active plan to versioned JSON and import a previously saved plan.
-- Reject oversized imports before rendering: wall height is capped at 240 inches,
-  stage width/depth at 1200 inches, imported plans at 500 wall runs, and generated
-  imported layouts at 5,000 boxes.
+- Reject oversized imports before rendering.
 - Starts with 12-inch snap, 72-inch wall height, yaw 210, and pitch 340 by default.
 - See total box count, cost, type breakdown, and wall-run breakdown.
 - Rotate, tilt, and zoom a 3D preview generated from the same box layout.
@@ -31,13 +30,17 @@ Live app: https://noddson.github.io/previs-layout/
 
 ## Run
 
-Open `index.html` in a browser, or serve the folder locally:
+Serve the folder locally:
 
 ```sh
 python3 -m http.server 4173
 ```
 
 Then visit `http://localhost:4173`.
+
+Opening `index.html` directly may work in some browsers, but a local server is
+recommended because the app loads `boxes.json`, `config.json`, `demo.json`, and
+JavaScript modules with `fetch`/ES modules.
 
 The FPV/WebXR view uses the vendored Three.js 0.164.1 files under `vendor/three`,
 so the public app does not execute runtime JavaScript from a third-party CDN.
@@ -52,10 +55,19 @@ This repo includes a Netlify/Cloudflare Pages-style [`_headers`](./_headers) fil
 
 - `Content-Security-Policy` (header form) including:
   - `default-src 'self'`
+  - `script-src 'self'`
+  - `connect-src 'self'`
+  - `img-src 'self' data: blob:`
   - `object-src 'none'`
   - `base-uri 'none'`
+  - `form-action 'none'`
+  - `style-src 'self' 'unsafe-inline'`
   - `frame-ancestors 'none'`
 - `X-Frame-Options: DENY`
+- `Strict-Transport-Security: max-age=31536000`
+- `X-Content-Type-Options: nosniff`
+- `Referrer-Policy: strict-origin-when-cross-origin`
+- `Permissions-Policy` limiting sensors, media, payment, USB, and WebXR access
 
 After deploy, verify in browser DevTools **Network** tab that `index.html` response headers include these values (and are not only present as a meta tag).
 
@@ -63,6 +75,10 @@ After deploy, verify in browser DevTools **Network** tab that `index.html` respo
 
 Box types are loaded from `boxes.json`. Each box needs an `id`, `name`, `length`,
 `depth`, `height`, `cost`, and hex `color`, all measured in inches except cost.
+The current `boxes.json` includes four box types: `cube24`, `tall18`, `cube18`,
+and `cube12`.
+If `boxes.json` cannot be loaded, the app falls back to the minimal built-in
+24-inch cube definition in `config.js`.
 
 Startup defaults are loaded from `config.json`:
 
@@ -70,6 +86,7 @@ Startup defaults are loaded from `config.json`:
 {
   "defaultWallHeight": 72,
   "defaultGridSnap": 12,
+  "defaultBuilderCount": 1,
   "defaultStageSize": {
     "width": 480,
     "depth": 360
@@ -77,24 +94,45 @@ Startup defaults are loaded from `config.json`:
 }
 ```
 
-Saved plan files include `version`, `boxTypes`, `config`, and `walls`, so an
-imported plan can restore the box definitions and costs it was created with.
+Values from `config.json` override the built-in fallback defaults in `config.js`
+when the file loads successfully.
+
+Runtime values are clamped to keep the layout bounded: wall height is 12-240
+inches, stage width/depth are 96-1200 inches, snap is 3-96 inches, and builder
+count is 1-99.
+
+Saved plan files include `version`, `app`, `savedAt`, `boxTypes`,
+`selectedBoxId`, `config`, and `walls`, so an imported plan can restore the box
+definitions, costs, selected box, active controls, and layout it was created with.
 
 The demo layout shown on startup and restored by the Demo button is loaded from
 `demo.json`. It uses the same `version`, `config`, selected box, and `walls`
 shape as saved plan files, with `boxId` values matching entries in `boxes.json`.
+On startup, the demo plan is applied after `config.json`, so the demo plan's
+`config` can set the initial controls; the current demo uses 4 builders.
+If `demo.json` cannot be loaded or validated, the app starts without a demo
+layout.
+
+Imported plan files must be version 1 JSON plans. Import validation rejects files
+larger than 1 MB, more than 50 box types, more than 500 wall runs, wall heights
+outside 12-240 inches, coordinates outside 0-1200 inches, box dimensions larger
+than 2400 inches, more than 2,000 removed block indexes per wall, generated
+layouts over 5,000 boxes, and wall footprints that would leave the imported
+stage.
 
 ## Notes
 
-Counts are calculated per wall run:
+Box counts are calculated per wall run:
 
 ```text
-ceil(wall length / box length) * ceil(wall height / box height)
+visible footprint columns * ceil(wall height / box height)
 ```
 
 Displayed run length is calculated from the physical box footprints in the wall
 run. Interior doorway gaps do not shorten the reported wall length, but erased
 stacks at either end of a wall run trim the run and update its reported length.
+Wall run and box type breakdown lengths show this physical run span, not the raw
+drag distance.
 Placements that would intersect existing boxes are blocked.
 Wall runs use the first clicked grid point as the first box footprint edge instead
 of a wall centerline, so boxes stay aligned to the grid from the placement point.
