@@ -1,10 +1,49 @@
 {
   "version": 1,
   "app": "previs-layout",
-  "selectedBoxId": "cube24",
+  "savedAt": "2026-05-22T11:06:09.870Z",
+  "boxTypes": [
+    {
+      "id": "cube24",
+      "name": "24 x 24 x 24 cube",
+      "length": 24,
+      "depth": 24,
+      "height": 24,
+      "cost": 5.89,
+      "color": "#0f8f8a"
+    },
+    {
+      "id": "tall18",
+      "name": "18 x 18 x 24 high",
+      "length": 18,
+      "depth": 18,
+      "height": 24,
+      "cost": 3.74,
+      "color": "#326fc0"
+    },
+    {
+      "id": "cube18",
+      "name": "18 x 18 x 18 cube",
+      "length": 18,
+      "depth": 18,
+      "height": 18,
+      "cost": 3.11,
+      "color": "#d88a12"
+    },
+    {
+      "id": "cube12",
+      "name": "12 x 12 x 12 cube",
+      "length": 12,
+      "depth": 12,
+      "height": 12,
+      "cost": 1.29,
+      "color": "#c74461"
+    }
+  ],
+  "selectedBoxId": "cube12",
   "config": {
     "defaultWallHeight": 72,
-    "defaultGridSnap": 12,
+    "defaultGridSnap": 6,
     "defaultBuilderCount": 4,
     "defaultStageSize": {
       "width": 480,
@@ -13,63 +52,179 @@
   },
   "walls": [
     {
-      "id": "demo-top-wall",
-      "x1": 96,
-      "y1": 72,
-      "x2": 384,
-      "y2": 72,
-      "height": 120,
-      "boxId": "cube24",
-      "removedBlocks": [2]
-    },
-    {
-      "id": "demo-right-wall",
-      "x1": 360,
-      "y1": 96,
-      "x2": 360,
-      "y2": 240,
-      "height": 120,
-      "boxId": "cube24",
+      "id": "1779425564295-078366e00ce6e8",
+      "x1": 90,
+      "y1": 48,
+      "x2": 234,
+      "y2": 48,
+      "height": 72,
+      "boxId": "tall18",
       "removedBlocks": []
     },
     {
-      "id": "demo-bottom-wall",
-      "x1": 96,
-      "y1": 240,
-      "x2": 384,
-      "y2": 240,
-      "height": 120,
-      "boxId": "cube24",
-      "removedBlocks": [6]
-    },
-    {
-      "id": "demo-left-wall",
-      "x1": 96,
-      "y1": 96,
-      "x2": 96,
-      "y2": 240,
-      "height": 120,
-      "boxId": "cube24",
-      "removedBlocks": []
-    },
-    {
-      "id": "demo-south-left-partition",
+      "id": "1779425564295-931803360a6d3",
       "x1": 216,
-      "y1": 264,
+      "y1": 84,
       "x2": 216,
-      "y2": 336,
+      "y2": 174,
+      "height": 72,
+      "boxId": "tall18",
+      "removedBlocks": [
+        2
+      ]
+    },
+    {
+      "id": "1779425564295-3647aad95968c",
+      "x1": 90,
+      "y1": 174,
+      "x2": 234,
+      "y2": 174,
       "height": 72,
       "boxId": "tall18",
       "removedBlocks": []
     },
     {
-      "id": "demo-south-right-partition",
-      "x1": 276,
-      "y1": 264,
-      "x2": 276,
-      "y2": 336,
+      "id": "1779425564295-2ca5b50b1448",
+      "x1": 90,
+      "y1": 66,
+      "x2": 90,
+      "y2": 174,
       "height": 72,
       "boxId": "tall18",
+      "removedBlocks": []
+    },
+    {
+      "id": "1779425571894-cb256e0ee85c1",
+      "x1": 288,
+      "y1": 66,
+      "x2": 432,
+      "y2": 66,
+      "height": 72,
+      "boxId": "tall18",
+      "removedBlocks": []
+    },
+    {
+      "id": "1779425571894-92e4de4d5dbbb8",
+      "x1": 414,
+      "y1": 102,
+      "x2": 414,
+      "y2": 192,
+      "height": 72,
+      "boxId": "tall18",
+      "removedBlocks": []
+    },
+    {
+      "id": "1779425571894-a5b6464bef0c3",
+      "x1": 288,
+      "y1": 192,
+      "x2": 432,
+      "y2": 192,
+      "height": 72,
+      "boxId": "tall18",
+      "removedBlocks": []
+    },
+    {
+      "id": "1779425571894-174055e72218f",
+      "x1": 288,
+      "y1": 84,
+      "x2": 288,
+      "y2": 192,
+      "height": 72,
+      "boxId": "tall18",
+      "removedBlocks": [
+        2
+      ]
+    },
+    {
+      "id": "1779425636055-0e802c5a784eb",
+      "x1": 234,
+      "y1": 102,
+      "x2": 282,
+      "y2": 102,
+      "height": 72,
+      "boxId": "tall18",
+      "removedBlocks": []
+    },
+    {
+      "id": "1779425639652-30dff3048404c8",
+      "x1": 234,
+      "y1": 138,
+      "x2": 276,
+      "y2": 138,
+      "height": 72,
+      "boxId": "tall18",
+      "removedBlocks": [
+        1
+      ]
+    },
+    {
+      "id": "1779447382282-101403a9d2a8a8",
+      "x1": 378,
+      "y1": 84,
+      "x2": 378,
+      "y2": 126,
+      "height": 72,
+      "boxId": "tall18",
+      "removedBlocks": []
+    },
+    {
+      "id": "1779447782901-59e04f81d91c58",
+      "x1": 108,
+      "y1": 66,
+      "x2": 126,
+      "y2": 66,
+      "height": 60,
+      "boxId": "cube12",
+      "removedBlocks": []
+    },
+    {
+      "id": "1779447785429-0e978bc41b2dd",
+      "x1": 108,
+      "y1": 78,
+      "x2": 126,
+      "y2": 78,
+      "height": 60,
+      "boxId": "cube12",
+      "removedBlocks": []
+    },
+    {
+      "id": "1779447831307-828f86e0269fb8",
+      "x1": 312,
+      "y1": 150,
+      "x2": 348,
+      "y2": 150,
+      "height": 36,
+      "boxId": "cube12",
+      "removedBlocks": []
+    },
+    {
+      "id": "1779447833691-9999b8b13782e",
+      "x1": 312,
+      "y1": 162,
+      "x2": 342,
+      "y2": 162,
+      "height": 36,
+      "boxId": "cube12",
+      "removedBlocks": []
+    },
+    {
+      "id": "1779447886656-3c44a63b2a58c8",
+      "x1": 126,
+      "y1": 132,
+      "x2": 126,
+      "y2": 162,
+      "height": 36,
+      "boxId": "cube12",
+      "removedBlocks": []
+    },
+    {
+      "id": "1779447889784-9fa9f98f18e088",
+      "x1": 138,
+      "y1": 132,
+      "x2": 138,
+      "y2": 162,
+      "height": 36,
+      "boxId": "cube12",
       "removedBlocks": []
     }
   ]
