@@ -53,7 +53,7 @@ const MAX_BOX_DIMENSION = 2400;
 const MAX_STAGE_SIZE = 2400;
 const XR_THUMBSTICK_DEADZONE = 0.15;
 const XR_TURN_DEGREES_PER_SECOND = 120;
-const INTERIOR_HOVER_DELAY_MS = 2500;
+const INTERIOR_HOVER_DELAY_MS = 1500;
 const GEOMETRY_EPSILON = 0.001;
 const MAX_INTERIOR_EDGE_CANDIDATES = 10;
 const MAX_INTERIOR_SIDE_MISSING_RATIO = 0.4;
@@ -359,6 +359,7 @@ function bindEvents() {
   els.fpvCanvas.addEventListener("pointercancel", onFpvPointerUp);
   document.addEventListener("pointerlockchange", updateFpvStatus);
   document.addEventListener("mousemove", onFpvMouseMove);
+  window.addEventListener("keydown", onGlobalKeyDown);
   window.addEventListener("keydown", onFpvKeyDown);
   window.addEventListener("keyup", onFpvKeyUp);
   window.addEventListener("blur", clearFpvKeys);
@@ -1344,8 +1345,6 @@ function intervalsCoverEnoughSlots(intervals, start, end) {
       coveredSlots.add(index);
     }
   }
-
-  if (!coveredSlots.has(0) || !coveredSlots.has(expectedSlots - 1)) return false;
 
   const missingSlots = expectedSlots - coveredSlots.size;
   const maxMissingSlots = Math.floor(expectedSlots * MAX_INTERIOR_SIDE_MISSING_RATIO);
@@ -2341,8 +2340,12 @@ function renderWallList() {
     const deleteButton = document.createElement("button");
 
     row.className = "wall-row";
+    row.dataset.wallId = wall.id;
+    row.classList.toggle("is-hovered", state.hoveredWallId === wall.id);
     row.addEventListener("mouseenter", () => setHoveredWallRun(wall.id));
     row.addEventListener("mouseleave", () => setHoveredWallRun(null));
+    row.addEventListener("pointerenter", () => setHoveredWallRun(wall.id));
+    row.addEventListener("pointerleave", () => setHoveredWallRun(null));
     swatch.className = "swatch";
     swatch.style.backgroundColor = box.color;
     title.className = "row-title";
@@ -2370,7 +2373,14 @@ function renderWallList() {
 function setHoveredWallRun(wallId) {
   if (state.hoveredWallId === wallId) return;
   state.hoveredWallId = wallId;
+  updateWallListHoverState();
   drawPlan();
+}
+
+function updateWallListHoverState() {
+  els.wallList
+    .querySelectorAll(".wall-row")
+    .forEach((row) => row.classList.toggle("is-hovered", row.dataset.wallId === state.hoveredWallId));
 }
 
 function deleteWallRun(wallId) {
@@ -2381,6 +2391,21 @@ function deleteWallRun(wallId) {
   clearHoveredInterior();
   resetFpvToSpawn();
   renderAll();
+}
+
+function onGlobalKeyDown(event) {
+  if (event.key !== "Delete" || shouldIgnoreGlobalDelete(event)) return;
+  if (!state.hoveredWallId) return;
+  event.preventDefault();
+  deleteWallRun(state.hoveredWallId);
+}
+
+function shouldIgnoreGlobalDelete(event) {
+  const target = event.target;
+  if (event.metaKey || event.ctrlKey || event.altKey) return true;
+  if (!(target instanceof HTMLElement)) return false;
+  if (target.isContentEditable) return true;
+  return ["INPUT", "SELECT", "TEXTAREA"].includes(target.tagName);
 }
 
 function createTrashIcon() {
