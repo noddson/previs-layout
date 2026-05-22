@@ -53,6 +53,10 @@ const MAX_BOX_DIMENSION = 2400;
 const MAX_STAGE_SIZE = 2400;
 const XR_THUMBSTICK_DEADZONE = 0.15;
 const XR_TURN_DEGREES_PER_SECOND = 120;
+const INTERIOR_HOVER_DELAY_MS = 2500;
+const GEOMETRY_EPSILON = 0.001;
+const MAX_INTERIOR_EDGE_CANDIDATES = 10;
+const MAX_INTERIOR_SIDE_MISSING_RATIO = 0.4;
 
 let THREE = null;
 let VRButton = null;
@@ -75,6 +79,12 @@ const state = {
   blockedReason: null,
   axisTargets: [],
   hoveredWallId: null,
+  hoveredInterior: {
+    timer: null,
+    key: null,
+    candidate: null,
+    label: null,
+  },
   orbit: {
     yaw: 210,
     pitch: 340,
@@ -135,6 +145,10 @@ const els = {
 const planCtx = els.planCanvas.getContext("2d");
 const previewCtx = els.previewCanvas.getContext("2d");
 let planMetrics = null;
+const PLAN_DRAG_MODE = {
+  DRAW: "draw",
+  MOVE_WALL: "move-wall",
+};
 
 async function init() {
   await loadAppConfiguration();
@@ -272,9 +286,11 @@ function bindEvents() {
   document.querySelectorAll("[data-tool]").forEach((button) => {
     button.addEventListener("click", () => {
       state.tool = button.dataset.tool;
+      clearHoveredInterior({ redraw: true });
       document
         .querySelectorAll("[data-tool]")
         .forEach((item) => item.classList.toggle("is-active", item === button));
+      updatePlanCursor();
     });
   });
 
@@ -294,6 +310,7 @@ function bindEvents() {
   els.builderCount.addEventListener("input", renderSummary);
   [els.stageWidth, els.stageDepth].forEach((input) =>
     input.addEventListener("input", () => {
+      clearHoveredInterior();
       resetFpvToSpawn();
       renderAll();
     }),
@@ -303,6 +320,7 @@ function bindEvents() {
   els.demoButton.addEventListener("click", () => {
     pushHistory();
     state.blockedReason = null;
+    clearHoveredInterior();
     addDemoLayout();
     resetFpvToSpawn();
     renderAll();
@@ -310,6 +328,7 @@ function bindEvents() {
   els.clearButton.addEventListener("click", () => {
     pushHistory();
     state.blockedReason = null;
+    clearHoveredInterior();
     state.walls = [];
     resetFpvToSpawn();
     renderAll();
@@ -326,6 +345,7 @@ function bindEvents() {
   els.planCanvas.addEventListener("pointerup", onPlanPointerUp);
   els.planCanvas.addEventListener("pointercancel", cancelPlanDrag);
   els.planCanvas.addEventListener("lostpointercapture", cancelPlanDrag);
+  els.planCanvas.addEventListener("pointerleave", onPlanPointerLeave);
 
   els.previewCanvas.addEventListener("pointerdown", onPreviewPointerDown);
   els.previewCanvas.addEventListener("pointermove", onPreviewPointerMove);
@@ -393,6 +413,7 @@ function pushHistory() {
 function undo() {
   const previous = state.history.pop();
   if (!previous) return;
+  clearHoveredInterior();
   state.walls = JSON.parse(previous);
   resetFpvToSpawn();
   renderAll();
@@ -445,7 +466,6 @@ function serializeWall(wall) {
     height: wall.height,
     boxId: wall.boxId,
     removedBlocks: normalizeRemovedBlocks(wall.removedBlocks),
-    roomLabel: wall.roomLabel ? { ...wall.roomLabel } : undefined,
   };
 }
 
@@ -529,7 +549,6 @@ function normalizeImportedWalls(walls, boxIds) {
       height: finiteNumberInRange(wall.height, "height", 12, 360),
       boxId,
       removedBlocks: normalizeRemovedBlocks(wall.removedBlocks),
-      roomLabel: normalizeRoomLabel(wall.roomLabel),
     };
   });
 }
@@ -560,19 +579,6 @@ function normalizeRemovedBlocks(blocks) {
   return [...new Set(indexes)].sort((a, b) => a - b);
 }
 
-function normalizeRoomLabel(label) {
-  if (!label || typeof label !== "object") return undefined;
-  const normalized = {
-    x: Number(label.x),
-    y: Number(label.y),
-    width: Number(label.width),
-    depth: Number(label.depth),
-  };
-  return Object.values(normalized).every((value) => Number.isFinite(value) && value >= 0 && value <= MAX_STAGE_SIZE)
-    ? normalized
-    : undefined;
-}
-
 function applyImportedPlan(plan) {
   BOX_TYPES = plan.boxTypes;
   appConfig = plan.config;
@@ -583,6 +589,7 @@ function applyImportedPlan(plan) {
   els.boxCost.value = getBoxCost(els.boxType.value);
   state.walls = plan.walls;
   state.blockedReason = null;
+  clearHoveredInterior();
   resetFpvToSpawn();
   renderAll();
 }
@@ -597,6 +604,13 @@ function makeWall(x1, y1, x2, y2, height, boxId) {
     height,
     boxId,
     removedBlocks: [],
+  };
+}
+
+function cloneWall(wall) {
+  return {
+    ...wall,
+    removedBlocks: [...(wall.removedBlocks || [])],
   };
 }
 
@@ -650,26 +664,33 @@ function worldToPlan(point) {
   };
 }
 
-function planToWorld(event) {
+function planToWorld(event, { snap = true } = {}) {
   const rect = els.planCanvas.getBoundingClientRect();
   const dpr = window.devicePixelRatio || 1;
   const x = (event.clientX - rect.left) * dpr;
   const y = (event.clientY - rect.top) * dpr;
-  const snap = getSnap();
+  const worldX = clamp((x - planMetrics.left) / planMetrics.scale, 0, planMetrics.stage.width);
+  const worldY = clamp((y - planMetrics.top) / planMetrics.scale, 0, planMetrics.stage.depth);
+  if (!snap) {
+    return { x: worldX, y: worldY };
+  }
+
+  const snapSize = getSnap();
   return {
-    x: clamp(Math.round(((x - planMetrics.left) / planMetrics.scale) / snap) * snap, 0, planMetrics.stage.width),
-    y: clamp(Math.round(((y - planMetrics.top) / planMetrics.scale) / snap) * snap, 0, planMetrics.stage.depth),
+    x: clamp(Math.round(worldX / snapSize) * snapSize, 0, planMetrics.stage.width),
+    y: clamp(Math.round(worldY / snapSize) * snapSize, 0, planMetrics.stage.depth),
   };
 }
 
 function onPlanPointerDown(event) {
   planMetrics = getPlanMetrics();
+  const hit = findBlockAt(planToWorld(event, { snap: false }));
   const point = planToWorld(event);
   els.planCanvas.setPointerCapture(event.pointerId);
+  clearHoveredInterior();
 
   if (state.tool === "erase") {
     state.blockedReason = null;
-    const hit = findBlockAt(point);
     if (hit) {
       pushHistory();
       eraseBlock(hit);
@@ -679,19 +700,65 @@ function onPlanPointerDown(event) {
     return;
   }
 
-  state.drag = { start: point, current: point };
+  if (hit) {
+    state.drag = {
+      kind: PLAN_DRAG_MODE.MOVE_WALL,
+      wallId: hit.wall.id,
+      start: point,
+      current: point,
+      originalWall: cloneWall(hit.wall),
+    };
+    setHoveredWallRun(hit.wall.id);
+    updatePlanCursor("grabbing");
+    drawPlan();
+    return;
+  }
+
+  state.drag = { kind: PLAN_DRAG_MODE.DRAW, start: point, current: point };
   drawPlan();
 }
 
 function onPlanPointerMove(event) {
-  if (!state.drag) return;
+  planMetrics = getPlanMetrics();
+  if (!state.drag) {
+    updatePlanHover(planToWorld(event, { snap: false }));
+    return;
+  }
+  clearHoveredInterior();
   state.drag.current = planToWorld(event);
   drawPlan();
+}
+
+function onPlanPointerLeave() {
+  if (state.drag) return;
+  setHoveredWallRun(null);
+  clearHoveredInterior();
+  updatePlanCursor();
 }
 
 function onPlanPointerUp(event) {
   if (!state.drag) return;
   state.drag.current = planToWorld(event);
+  if (state.drag.kind === PLAN_DRAG_MODE.MOVE_WALL) {
+    const nextWall = getDraggedWall(state.drag);
+    const placement = validatePlacement([nextWall], { ignoreWallIds: new Set([state.drag.wallId]) });
+    if (placement.ok) {
+      state.blockedReason = null;
+      if (wallMoved(state.drag.originalWall, nextWall)) {
+        pushHistory();
+        state.walls = state.walls.map((wall) => (wall.id === state.drag.wallId ? nextWall : wall));
+        clearHoveredInterior();
+        resetFpvToSpawn();
+      }
+    } else {
+      state.blockedReason = placement.reason;
+    }
+    state.drag = null;
+    updatePlanHover(planToWorld(event, { snap: false }));
+    renderAll();
+    return;
+  }
+
   const created = buildWallsFromDrag(state.drag.start, state.drag.current);
   state.drag = null;
   if (created.length) {
@@ -700,6 +767,7 @@ function onPlanPointerUp(event) {
       state.blockedReason = null;
       pushHistory();
       state.walls.push(...created);
+      clearHoveredInterior();
       resetFpvToSpawn();
     } else {
       state.blockedReason = placement.reason;
@@ -711,10 +779,108 @@ function onPlanPointerUp(event) {
 function cancelPlanDrag() {
   if (!state.drag) return;
   state.drag = null;
+  state.blockedReason = null;
+  clearHoveredInterior();
+  updatePlanCursor();
   drawPlan();
 }
 
-function buildWallsFromDrag(start, end) {
+function updatePlanHover(point) {
+  const hit = findBlockAt(point);
+  if (hit || state.tool === "erase") {
+    clearHoveredInterior();
+  } else {
+    scheduleInteriorHover(point);
+  }
+  setHoveredWallRun(hit?.wall.id || null);
+  updatePlanCursor(hit && state.tool !== "erase" ? "grab" : null);
+}
+
+function updatePlanCursor(cursor) {
+  els.planCanvas.style.cursor = cursor || (state.tool === "erase" ? "cell" : "crosshair");
+}
+
+function clearHoveredInterior({ redraw = false } = {}) {
+  const hadHover = Boolean(
+    state.hoveredInterior.timer ||
+      state.hoveredInterior.key ||
+      state.hoveredInterior.candidate ||
+      state.hoveredInterior.label,
+  );
+  if (state.hoveredInterior.timer) {
+    window.clearTimeout(state.hoveredInterior.timer);
+  }
+  state.hoveredInterior.timer = null;
+  state.hoveredInterior.key = null;
+  state.hoveredInterior.candidate = null;
+  state.hoveredInterior.label = null;
+  if (redraw && hadHover) drawPlan();
+  return hadHover;
+}
+
+function scheduleInteriorHover(point) {
+  const candidate = findInteriorAt(point);
+  if (!candidate) {
+    clearHoveredInterior({ redraw: Boolean(state.hoveredInterior.label) });
+    return;
+  }
+
+  const key = getInteriorCandidateKey(candidate);
+  if (state.hoveredInterior.key === key) return;
+
+  const hadVisibleLabel = Boolean(state.hoveredInterior.label);
+  clearHoveredInterior();
+  state.hoveredInterior.key = key;
+  state.hoveredInterior.candidate = candidate;
+  state.hoveredInterior.timer = window.setTimeout(() => {
+    if (state.drag || state.hoveredInterior.key !== key) return;
+    state.hoveredInterior.timer = null;
+    state.hoveredInterior.label = makeInteriorLabel(candidate);
+    drawPlan();
+  }, INTERIOR_HOVER_DELAY_MS);
+  if (hadVisibleLabel) drawPlan();
+}
+
+function getInteriorCandidateKey(candidate) {
+  return [candidate.left, candidate.top, candidate.right, candidate.bottom]
+    .map((value) => Math.round(value * 1000) / 1000)
+    .join(":");
+}
+
+function makeInteriorLabel(candidate) {
+  const width = candidate.right - candidate.left;
+  const depth = candidate.bottom - candidate.top;
+  return {
+    x: candidate.left + width / 2,
+    y: candidate.top + depth / 2,
+    width,
+    depth,
+    areaSqFt: (width * depth) / 144,
+  };
+}
+
+function getDraggedWall(drag) {
+  const dx = drag.current.x - drag.start.x;
+  const dy = drag.current.y - drag.start.y;
+  return moveWallBy(drag.originalWall, dx, dy);
+}
+
+function moveWallBy(wall, dx, dy) {
+  const moved = {
+    ...cloneWall(wall),
+    x1: wall.x1 + dx,
+    y1: wall.y1 + dy,
+    x2: wall.x2 + dx,
+    y2: wall.y2 + dy,
+  };
+  return moved;
+}
+
+function wallMoved(a, b) {
+  return a.x1 !== b.x1 || a.y1 !== b.y1 || a.x2 !== b.x2 || a.y2 !== b.y2;
+}
+
+function buildWallsFromDrag(start, end, { includeRoomLabel = false } = {}) {
   const box = getActiveBox();
   const height = getWallHeight();
 
@@ -746,19 +912,20 @@ function buildWallsFromDrag(start, end) {
     const bottomY = sideY + interiorDepth;
 
     const interiorWidth = Math.max(0, width - box.depth * 2);
-    const roomLabel = {
-      x: x1 + box.depth + interiorWidth / 2,
-      y: sideY + interiorDepth / 2,
-      width: interiorWidth,
-      depth: interiorDepth,
-    };
     const walls = [
       makeWall(x1, y1, x2, y1, height, box.id),
       makeWall(sideX, sideY, sideX, bottomY, height, box.id),
       makeWall(x1, bottomY, x2, bottomY, height, box.id),
       makeWall(x1, sideY, x1, bottomY, height, box.id),
     ];
-    walls[0].roomLabel = roomLabel;
+    if (includeRoomLabel) {
+      walls[0].roomLabel = {
+        x: x1 + box.depth + interiorWidth / 2,
+        y: sideY + interiorDepth / 2,
+        width: interiorWidth,
+        depth: interiorDepth,
+      };
+    }
     return walls;
   }
 
@@ -785,7 +952,8 @@ function distance(x1, y1, x2, y2) {
 }
 
 function findBlockAt(point) {
-  for (const wall of state.walls) {
+  for (let i = state.walls.length - 1; i >= 0; i -= 1) {
+    const wall = state.walls[i];
     const footprint = generateFootprints(wall).find((item) => pointInFootprint(point, item));
     if (footprint) return { wall, blockIndex: footprint.blockIndex };
   }
@@ -805,18 +973,32 @@ function drawPlan() {
   planMetrics = getPlanMetrics();
   planCtx.clearRect(0, 0, els.planCanvas.width, els.planCanvas.height);
   drawPlanBackground();
-  state.walls.forEach((wall) => drawPlanWall(wall, false));
-  const hoveredWall = state.walls.find((wall) => wall.id === state.hoveredWallId);
+  const movingWallId = state.drag?.kind === PLAN_DRAG_MODE.MOVE_WALL ? state.drag.wallId : null;
+  state.walls.forEach((wall) => {
+    if (wall.id !== movingWallId) drawPlanWall(wall, false);
+  });
+  const hoveredWall =
+    movingWallId && movingWallId === state.hoveredWallId
+      ? getDraggedWall(state.drag)
+      : state.walls.find((wall) => wall.id === state.hoveredWallId);
   if (hoveredWall) drawPlanWallHighlight(hoveredWall);
-  drawRoomLabels(state.walls, false);
 
-  if (state.drag) {
-    const previewWalls = buildWallsFromDrag(state.drag.start, state.drag.current);
+  if (state.drag?.kind === PLAN_DRAG_MODE.DRAW) {
+    const previewWalls = buildWallsFromDrag(state.drag.start, state.drag.current, {
+      includeRoomLabel: state.tool === "room",
+    });
     const placement = validatePlacement(previewWalls);
     state.blockedReason = previewWalls.length && !placement.ok ? placement.reason : null;
     previewWalls.forEach((wall) => drawPlanWall(wall, true, !placement.ok));
     drawRoomLabels(previewWalls, !placement.ok);
+  } else if (state.drag?.kind === PLAN_DRAG_MODE.MOVE_WALL) {
+    const movedWall = getDraggedWall(state.drag);
+    const placement = validatePlacement([movedWall], { ignoreWallIds: new Set([state.drag.wallId]) });
+    state.blockedReason = placement.ok ? null : placement.reason;
+    drawPlanWall(movedWall, true, !placement.ok);
+    drawPlanWallHighlight(movedWall);
   }
+  drawHoveredInterior();
   drawPlanStatus();
 }
 
@@ -921,14 +1103,17 @@ function drawRoomLabel(label, isBlocked) {
   const point = worldToPlan({ x: label.x, y: label.y });
   const title = "Interior";
   const dimensions = `${formatFeetInches(label.width)} x ${formatFeetInches(label.depth)}`;
+  const area = Number.isFinite(label.areaSqFt) ? `${formatArea(label.areaSqFt)} sq ft` : null;
 
   planCtx.save();
   planCtx.font = `${11 * dpr}px Inter, sans-serif`;
   const titleWidth = planCtx.measureText(title).width;
   planCtx.font = `700 ${14 * dpr}px Inter, sans-serif`;
   const dimensionsWidth = planCtx.measureText(dimensions).width;
-  const width = Math.max(titleWidth, dimensionsWidth) + 24 * dpr;
-  const height = 44 * dpr;
+  planCtx.font = `${11 * dpr}px Inter, sans-serif`;
+  const areaWidth = area ? planCtx.measureText(area).width : 0;
+  const width = Math.max(titleWidth, dimensionsWidth, areaWidth) + 24 * dpr;
+  const height = (area ? 58 : 44) * dpr;
   const x = point.x - width / 2;
   const y = point.y - height / 2;
 
@@ -946,8 +1131,18 @@ function drawRoomLabel(label, isBlocked) {
   planCtx.fillText(title, point.x, point.y - 9 * dpr);
   planCtx.fillStyle = isBlocked ? "#ffffff" : "#172026";
   planCtx.font = `800 ${13 * dpr}px Inter, sans-serif`;
-  planCtx.fillText(dimensions, point.x, point.y + 8 * dpr);
+  planCtx.fillText(dimensions, point.x, point.y + (area ? 4 : 8) * dpr);
+  if (area) {
+    planCtx.fillStyle = isBlocked ? "#ffffff" : "#68717a";
+    planCtx.font = `${11 * dpr}px Inter, sans-serif`;
+    planCtx.fillText(area, point.x, point.y + 20 * dpr);
+  }
   planCtx.restore();
+}
+
+function drawHoveredInterior() {
+  if (state.drag || !state.hoveredInterior.label) return;
+  drawRoomLabel(state.hoveredInterior.label, false);
 }
 
 function drawPlanStatus() {
@@ -1035,10 +1230,160 @@ function getPlacementFootprints(walls) {
   );
 }
 
-function validatePlacement(newWalls) {
+function findInteriorAt(point) {
+  const footprints = getPlacementFootprints(state.walls);
+  if (footprints.some((footprint) => pointInRect(point, footprint.rect))) return null;
+
+  const leftEdges = nearestEdgeCandidates(
+    footprints.map((footprint) => footprint.rect.right).filter((edge) => edge < point.x - GEOMETRY_EPSILON),
+    point.x,
+  );
+  const rightEdges = nearestEdgeCandidates(
+    footprints.map((footprint) => footprint.rect.left).filter((edge) => edge > point.x + GEOMETRY_EPSILON),
+    point.x,
+  );
+  const topEdges = nearestEdgeCandidates(
+    footprints.map((footprint) => footprint.rect.bottom).filter((edge) => edge < point.y - GEOMETRY_EPSILON),
+    point.y,
+  );
+  const bottomEdges = nearestEdgeCandidates(
+    footprints.map((footprint) => footprint.rect.top).filter((edge) => edge > point.y + GEOMETRY_EPSILON),
+    point.y,
+  );
+
+  let best = null;
+  let bestArea = Infinity;
+  for (const left of leftEdges) {
+    for (const right of rightEdges) {
+      if (right <= left + GEOMETRY_EPSILON) continue;
+      for (const top of topEdges) {
+        for (const bottom of bottomEdges) {
+          if (bottom <= top + GEOMETRY_EPSILON) continue;
+          const candidate = { left, right, top, bottom };
+          const area = (right - left) * (bottom - top);
+          if (area >= bestArea) continue;
+          if (validInteriorCandidate(candidate, footprints)) {
+            best = candidate;
+            bestArea = area;
+          }
+        }
+      }
+    }
+  }
+  return best;
+}
+
+function nearestEdgeCandidates(values, target) {
+  const unique = [...new Set(values.map((value) => Math.round(value * 1000) / 1000))];
+  return unique
+    .sort((a, b) => Math.abs(a - target) - Math.abs(b - target))
+    .slice(0, MAX_INTERIOR_EDGE_CANDIDATES);
+}
+
+function validInteriorCandidate(candidate, footprints) {
+  const stage = getStage();
+  if (footprintOutOfBounds(candidate, stage)) return false;
+  if (footprints.some((footprint) => rectsIntersect(candidate, footprint.rect))) return false;
+  return (
+    hasCoveredInteriorSide(candidate, footprints, "top") &&
+    hasCoveredInteriorSide(candidate, footprints, "right") &&
+    hasCoveredInteriorSide(candidate, footprints, "bottom") &&
+    hasCoveredInteriorSide(candidate, footprints, "left")
+  );
+}
+
+function hasCoveredInteriorSide(candidate, footprints, side) {
+  const horizontal = side === "top" || side === "bottom";
+  const target =
+    side === "top"
+      ? candidate.top
+      : side === "bottom"
+        ? candidate.bottom
+        : side === "left"
+          ? candidate.left
+          : candidate.right;
+  const start = horizontal ? candidate.left : candidate.top;
+  const end = horizontal ? candidate.right : candidate.bottom;
+  const intervals = [];
+
+  footprints.forEach((footprint) => {
+    const rect = footprint.rect;
+    if (side === "top" && approximatelyEqual(rect.bottom, target)) {
+      addClippedInterval(intervals, rect.left, rect.right, start, end);
+    } else if (side === "bottom" && approximatelyEqual(rect.top, target)) {
+      addClippedInterval(intervals, rect.left, rect.right, start, end);
+    } else if (side === "left" && approximatelyEqual(rect.right, target)) {
+      addClippedInterval(intervals, rect.top, rect.bottom, start, end);
+    } else if (side === "right" && approximatelyEqual(rect.left, target)) {
+      addClippedInterval(intervals, rect.top, rect.bottom, start, end);
+    }
+  });
+
+  return intervalsCoverEnoughSlots(intervals, start, end);
+}
+
+function addClippedInterval(intervals, intervalStart, intervalEnd, rangeStart, rangeEnd) {
+  const start = Math.max(intervalStart, rangeStart);
+  const end = Math.min(intervalEnd, rangeEnd);
+  if (end > start + GEOMETRY_EPSILON) intervals.push({ start, end });
+}
+
+function intervalsCoverEnoughSlots(intervals, start, end) {
+  const blockUnit = inferInteriorSideBlockUnit(intervals);
+  if (!blockUnit) return false;
+
+  const sideLength = end - start;
+  const expectedSlots = Math.floor((sideLength + GEOMETRY_EPSILON) / blockUnit);
+  if (expectedSlots < 1) return false;
+
+  const coveredSlots = new Set();
+  for (let index = 0; index < expectedSlots; index += 1) {
+    const slotStart = start + index * blockUnit;
+    const slotEnd = slotStart + blockUnit;
+    if (intervals.some((interval) => intervalCoversSlot(interval, slotStart, slotEnd))) {
+      coveredSlots.add(index);
+    }
+  }
+
+  if (!coveredSlots.has(0) || !coveredSlots.has(expectedSlots - 1)) return false;
+
+  const missingSlots = expectedSlots - coveredSlots.size;
+  const maxMissingSlots = Math.floor(expectedSlots * MAX_INTERIOR_SIDE_MISSING_RATIO);
+  return missingSlots <= maxMissingSlots;
+}
+
+function inferInteriorSideBlockUnit(intervals) {
+  const lengths = intervals
+    .map((interval) => interval.end - interval.start)
+    .filter((length) => length > GEOMETRY_EPSILON)
+    .sort((a, b) => a - b);
+  return lengths[0] || null;
+}
+
+function intervalCoversSlot(interval, slotStart, slotEnd) {
+  const overlap = Math.min(interval.end, slotEnd) - Math.max(interval.start, slotStart);
+  return overlap >= (slotEnd - slotStart) / 2 - GEOMETRY_EPSILON;
+}
+
+function approximatelyEqual(a, b) {
+  return Math.abs(a - b) <= GEOMETRY_EPSILON;
+}
+
+function pointInRect(point, rect) {
+  return (
+    point.x > rect.left + GEOMETRY_EPSILON &&
+    point.x < rect.right - GEOMETRY_EPSILON &&
+    point.y > rect.top + GEOMETRY_EPSILON &&
+    point.y < rect.bottom - GEOMETRY_EPSILON
+  );
+}
+
+function validatePlacement(newWalls, { ignoreWallIds = new Set() } = {}) {
   if (!newWalls.length) return { ok: true, reason: null };
   const newFootprints = getPlacementFootprints(newWalls);
-  const existingFootprints = getPlacementFootprints(state.walls);
+  const existingFootprints = getPlacementFootprints(
+    state.walls.filter((wall) => !ignoreWallIds.has(wall.id)),
+  );
   const stage = getStage();
 
   if (newFootprints.some((footprint) => footprintOutOfBounds(footprint.rect, stage))) {
@@ -2033,6 +2378,7 @@ function deleteWallRun(wallId) {
   pushHistory();
   state.walls = state.walls.filter((wall) => wall.id !== wallId);
   state.hoveredWallId = null;
+  clearHoveredInterior();
   resetFpvToSpawn();
   renderAll();
 }
@@ -2081,6 +2427,11 @@ function formatMoney(value) {
 function formatMinutes(value) {
   const rounded = Math.round(value * 10) / 10;
   return `${Number.isInteger(rounded) ? rounded : rounded.toFixed(1)} min`;
+}
+
+function formatArea(value) {
+  const rounded = Math.round(value * 10) / 10;
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
 }
 
 function formatFeetInches(inches) {

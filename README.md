@@ -7,7 +7,8 @@ Live app: https://noddson.github.io/previs-layout/
 ## What It Does
 
 - Draw wall runs or full rooms from a top-down snapped grid.
-- Label newly drawn rooms with their internal clear dimensions.
+- Preview newly drawn rooms with their internal clear dimensions while dragging.
+- Hover over rectangular wall-bounded spaces to see clear dimensions and area, allowing doorway gaps up to 40% of each side.
 - Pick configurable box sizes from `boxes.json`:
   - 24 x 24 x 24 cube, $5.89 each
   - 18 x 18 x 18 cube, $3.11 each
