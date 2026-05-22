@@ -17,6 +17,9 @@ Live app: https://noddson.github.io/previs-layout/
 - Set startup defaults in `config.json`, including snap, wall height, and stage size.
 - Load the startup/demo room layout from `demo.json`.
 - Save the active plan to versioned JSON and import a previously saved plan.
+- Reject oversized imports before rendering: wall height is capped at 240 inches,
+  stage width/depth at 1200 inches, imported plans at 500 wall runs, and generated
+  imported layouts at 5,000 boxes.
 - Starts with 12-inch snap, 72-inch wall height, yaw 210, and pitch 340 by default.
 - See total box count, cost, type breakdown, and wall-run breakdown.
 - Rotate, tilt, and zoom a 3D preview generated from the same box layout.

@@ -47,11 +47,13 @@ const INCH_TO_METER = 0.0254;
 const BOX_EDGE_COLOR = 0x000000;
 const MAX_IMPORTED_FILE_BYTES = 1_000_000;
 const MAX_BOX_TYPES = 50;
-const MAX_WALLS = 2000;
+const MAX_IMPORTED_WALLS = 500;
+const MAX_IMPORTED_BOXES = 5000;
 const MAX_REMOVED_BLOCKS = 2000;
 const MAX_STRING_LENGTH = 80;
 const MAX_BOX_DIMENSION = 2400;
-const MAX_STAGE_SIZE = 2400;
+const MAX_WALL_HEIGHT = 240;
+const MAX_STAGE_SIZE = 1200;
 const XR_THUMBSTICK_DEADZONE = 0.15;
 const XR_TURN_DEGREES_PER_SECOND = 120;
 const INTERIOR_HOVER_DELAY_MS = 1500;
@@ -133,7 +135,7 @@ function normalizeColor(value, fallback) {
 function normalizeConfig(source) {
   const stage = source?.defaultStageSize || source?.stage || {};
   return {
-    defaultWallHeight: clamp(Number(source?.defaultWallHeight ?? source?.wallHeight) || DEFAULT_CONFIG.defaultWallHeight, 12, 360),
+    defaultWallHeight: clamp(Number(source?.defaultWallHeight ?? source?.wallHeight) || DEFAULT_CONFIG.defaultWallHeight, 12, MAX_WALL_HEIGHT),
     defaultGridSnap: clamp(Number(source?.defaultGridSnap ?? source?.gridSnap) || DEFAULT_CONFIG.defaultGridSnap, 3, 96),
     defaultBuilderCount: clamp(
       Math.round(
@@ -169,6 +171,6 @@ function normalizeRemovedBlocks(blocks) {
 }
 
 export {
-  CURRENT_PLAN_VERSION, DEFAULT_BOX_TYPES, DEFAULT_CONFIG, THREE_MODULE_URL, VR_BUTTON_MODULE_URL, DEMO_PLAN_PATH, INCH_TO_METER, BOX_EDGE_COLOR, MAX_IMPORTED_FILE_BYTES, MAX_BOX_TYPES, MAX_WALLS, MAX_REMOVED_BLOCKS, MAX_STRING_LENGTH, MAX_BOX_DIMENSION, MAX_STAGE_SIZE, XR_THUMBSTICK_DEADZONE, XR_TURN_DEGREES_PER_SECOND, INTERIOR_HOVER_DELAY_MS, GEOMETRY_EPSILON, MAX_INTERIOR_EDGE_CANDIDATES, MAX_INTERIOR_SIDE_MISSING_RATIO,
+  CURRENT_PLAN_VERSION, DEFAULT_BOX_TYPES, DEFAULT_CONFIG, THREE_MODULE_URL, VR_BUTTON_MODULE_URL, DEMO_PLAN_PATH, INCH_TO_METER, BOX_EDGE_COLOR, MAX_IMPORTED_FILE_BYTES, MAX_BOX_TYPES, MAX_IMPORTED_WALLS, MAX_IMPORTED_BOXES, MAX_REMOVED_BLOCKS, MAX_STRING_LENGTH, MAX_BOX_DIMENSION, MAX_WALL_HEIGHT, MAX_STAGE_SIZE, XR_THUMBSTICK_DEADZONE, XR_TURN_DEGREES_PER_SECOND, INTERIOR_HOVER_DELAY_MS, GEOMETRY_EPSILON, MAX_INTERIOR_EDGE_CANDIDATES, MAX_INTERIOR_SIDE_MISSING_RATIO,
   fetchJson, normalizeBoxes, normalizeIdentifier, normalizePlainText, validDimension, normalizeColor, normalizeConfig, clamp, normalizeRemovedBlocks,
 };

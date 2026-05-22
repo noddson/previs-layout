@@ -3,9 +3,11 @@ import {
   DEFAULT_BOX_TYPES,
   DEFAULT_CONFIG,
   DEMO_PLAN_PATH,
+  MAX_IMPORTED_BOXES,
   MAX_IMPORTED_FILE_BYTES,
+  MAX_IMPORTED_WALLS,
   MAX_STAGE_SIZE,
-  MAX_WALLS,
+  MAX_WALL_HEIGHT,
   clamp,
   fetchJson,
   normalizeBoxes,
@@ -74,6 +76,9 @@ Object.assign(app, {
   parsePlanJson,
   upgradePlan,
   normalizeImportedWalls,
+  validateImportedPlanLimits,
+  estimateImportedWallBoxCount,
+  getImportedWallFootprintBounds,
   finiteNumber,
   finiteNumberInRange,
   applyImportedPlan,
@@ -114,6 +119,9 @@ function populateBoxOptions(selectedId = BOX_TYPES[0].id) {
 }
 
 function applyDefaultConfig() {
+  app.els.wallHeight.max = MAX_WALL_HEIGHT;
+  app.els.stageWidth.max = MAX_STAGE_SIZE;
+  app.els.stageDepth.max = MAX_STAGE_SIZE;
   app.els.wallHeight.value = appConfig.defaultWallHeight;
   app.els.snapSize.value = appConfig.defaultGridSnap;
   app.els.builderCount.value = appConfig.defaultBuilderCount;
@@ -226,7 +234,7 @@ function getSnap() {
 }
 
 function getWallHeight() {
-  return clamp(Number(app.els.wallHeight.value) || 72, 12, 360);
+  return clamp(Number(app.els.wallHeight.value) || 72, 12, MAX_WALL_HEIGHT);
 }
 
 function getBuilderCount() {
@@ -331,14 +339,16 @@ function parsePlanJson(source) {
   const importedBoxes = normalizeBoxes(plan.boxTypes || plan.boxes, { strict: true });
   const boxIds = new Set(importedBoxes.map((box) => box.id));
   const walls = normalizeImportedWalls(plan.walls, boxIds);
+  const config = normalizeConfig({
+    ...plan.config,
+    defaultBuilderCount: plan.config?.defaultBuilderCount ?? plan.builderCount ?? plan.buildPersonCount,
+  });
+  validateImportedPlanLimits(walls, importedBoxes, config.defaultStageSize);
 
   return {
     boxTypes: importedBoxes,
     selectedBoxId: String(plan.selectedBoxId || importedBoxes[0].id),
-    config: normalizeConfig({
-      ...plan.config,
-      defaultBuilderCount: plan.config?.defaultBuilderCount ?? plan.builderCount ?? plan.buildPersonCount,
-    }),
+    config,
     walls,
   };
 }
@@ -353,8 +363,8 @@ function upgradePlan(source) {
   if (!Array.isArray(source.walls)) {
     throw new Error("Plan import failed: missing walls array.");
   }
-  if (source.walls.length > MAX_WALLS) {
-    throw new Error(`Plan import failed: more than ${MAX_WALLS} wall runs.`);
+  if (source.walls.length > MAX_IMPORTED_WALLS) {
+    throw new Error(`Plan import failed: more than ${MAX_IMPORTED_WALLS} wall runs.`);
   }
   return source;
 }
@@ -369,11 +379,70 @@ function normalizeImportedWalls(walls, boxIds) {
       y1: finiteNumberInRange(wall.y1, "y1", 0, MAX_STAGE_SIZE),
       x2: finiteNumberInRange(wall.x2, "x2", 0, MAX_STAGE_SIZE),
       y2: finiteNumberInRange(wall.y2, "y2", 0, MAX_STAGE_SIZE),
-      height: finiteNumberInRange(wall.height, "height", 12, 360),
+      height: finiteNumberInRange(wall.height, "height", 12, MAX_WALL_HEIGHT),
       boxId,
       removedBlocks: normalizeRemovedBlocks(wall.removedBlocks),
     };
   });
+}
+
+function validateImportedPlanLimits(walls, boxes, stage) {
+  const boxesById = new Map(boxes.map((box) => [box.id, box]));
+  let boxCount = 0;
+
+  walls.forEach((wall) => {
+    const box = boxesById.get(wall.boxId);
+    const bounds = getImportedWallFootprintBounds(wall, box);
+    if (
+      bounds.left < 0 ||
+      bounds.top < 0 ||
+      bounds.right > stage.width ||
+      bounds.bottom > stage.depth
+    ) {
+      throw new Error("Plan import failed: wall boxes would leave the stage.");
+    }
+    boxCount += estimateImportedWallBoxCount(wall, box);
+    if (boxCount > MAX_IMPORTED_BOXES) {
+      throw new Error(`Plan import failed: more than ${MAX_IMPORTED_BOXES.toLocaleString()} generated boxes.`);
+    }
+  });
+}
+
+function estimateImportedWallBoxCount(wall, box) {
+  const columns = Math.max(1, Math.ceil(getImportedWallLength(wall) / box.length));
+  const removed = new Set(normalizeRemovedBlocks(wall.removedBlocks).filter((index) => index < columns));
+  const layers = Math.max(1, Math.ceil(wall.height / box.height));
+  return Math.max(0, columns - removed.size) * layers;
+}
+
+function getImportedWallFootprintBounds(wall, box) {
+  const horizontal = Math.abs(wall.x2 - wall.x1) >= Math.abs(wall.y2 - wall.y1);
+  const direction = horizontal ? Math.sign(wall.x2 - wall.x1) || 1 : Math.sign(wall.y2 - wall.y1) || 1;
+  const columns = Math.max(1, Math.ceil(getImportedWallLength(wall) / box.length));
+
+  if (horizontal) {
+    const start = direction > 0 ? wall.x1 : wall.x1 - columns * box.length;
+    const end = direction > 0 ? wall.x1 + columns * box.length : wall.x1;
+    return {
+      left: Math.min(start, end),
+      top: wall.y1,
+      right: Math.max(start, end),
+      bottom: wall.y1 + box.depth,
+    };
+  }
+
+  const start = direction > 0 ? wall.y1 : wall.y1 - columns * box.length;
+  const end = direction > 0 ? wall.y1 + columns * box.length : wall.y1;
+  return {
+    left: wall.x1,
+    top: Math.min(start, end),
+    right: wall.x1 + box.depth,
+    bottom: Math.max(start, end),
+  };
+}
+
+function getImportedWallLength(wall) {
+  return Math.max(Math.abs(wall.x2 - wall.x1), Math.abs(wall.y2 - wall.y1));
 }
 
 function finiteNumber(value, label) {
