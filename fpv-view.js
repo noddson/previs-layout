@@ -140,10 +140,10 @@ function updateXrFpv(dt) {
   }
 
   if (controls.move && Math.hypot(controls.move.x, controls.move.y) > XR_THUMBSTICK_DEADZONE) {
-    const headsetBasis = getXrHeadsetGroundBasis();
-    if (headsetBasis) {
-      const moveRenderX = headsetBasis.right.x * controls.move.x + headsetBasis.forward.x * controls.move.y;
-      const moveRenderZ = headsetBasis.right.z * controls.move.x + headsetBasis.forward.z * controls.move.y;
+    const playerBasis = getXrPlayerGroundBasis();
+    if (playerBasis) {
+      const moveRenderX = playerBasis.right.x * controls.move.x + playerBasis.forward.x * controls.move.y;
+      const moveRenderZ = playerBasis.right.z * controls.move.x + playerBasis.forward.z * controls.move.y;
       const magnitude = Math.hypot(moveRenderX, moveRenderZ);
       if (magnitude) {
         const step = state.fpv.speed * dt;
@@ -156,15 +156,26 @@ function updateXrFpv(dt) {
   return didUpdate;
 }
 
-function getXrHeadsetGroundBasis() {
+function getXrPlayerGroundBasis() {
   const forward = new THREE.Vector3();
   fpvRenderer.xr.getCamera(fpvCamera).getWorldDirection(forward);
   forward.y = 0;
   if (forward.lengthSq() < 0.0001) return null;
   forward.normalize();
+  rotateGroundVectorByFpvYaw(forward);
 
   const right = new THREE.Vector3().crossVectors(new THREE.Vector3(0, 1, 0), forward).normalize();
   return { forward, right };
+}
+
+function rotateGroundVectorByFpvYaw(vector) {
+  const yaw = (state.fpv.yaw * Math.PI) / 180;
+  const cos = Math.cos(yaw);
+  const sin = Math.sin(yaw);
+  const x = vector.x * cos + vector.z * sin;
+  const z = -vector.x * sin + vector.z * cos;
+  vector.set(x, 0, z).normalize();
+  return vector;
 }
 
 function getXrThumbstickControls() {
