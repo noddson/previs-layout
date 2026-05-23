@@ -157,10 +157,8 @@ function updateXrFpv(dt) {
 }
 
 function getXrHeadsetGroundBasis() {
-  const xrCamera = fpvRenderer.xr.getCamera(fpvCamera);
-  const headsetCamera = xrCamera.cameras?.[0] || xrCamera;
   const forward = new THREE.Vector3();
-  headsetCamera.getWorldDirection(forward);
+  fpvRenderer.xr.getCamera(fpvCamera).getWorldDirection(forward);
   forward.y = 0;
   if (forward.lengthSq() < 0.0001) return null;
   forward.normalize();
@@ -197,11 +195,11 @@ function getXrThumbstickControls() {
 function getGamepadThumbstickAxes(axes) {
   const primary = {
     x: axes[0] || 0,
-    y: -(axes[1] || 0),
+    y: axes[1] || 0,
   };
   const secondary = {
     x: axes[2] || 0,
-    y: -(axes[3] || 0),
+    y: axes[3] || 0,
   };
   return Math.hypot(secondary.x, secondary.y) > Math.hypot(primary.x, primary.y)
     ? secondary
