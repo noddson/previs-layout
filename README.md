@@ -148,3 +148,13 @@ Rooms are generated with butt-jointed corners, so top and bottom runs claim the 
 volume and side runs start between them. Room dimensions are snapped to whole box
 increments for the selected box type so the physical boxes remain orthogonal and
 non-intersecting.
+
+## Attribution
+
+This project was created by Nick Oddson.
+
+If you use, copy, modify, or distribute this software, please retain the copyright notice and MIT License as required by the license.
+
+## License
+
+This project is licensed under the MIT License. See [LICENSE](./LICENSE) for details.
